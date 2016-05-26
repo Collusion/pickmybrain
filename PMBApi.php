@@ -90,7 +90,6 @@ class PickMyBrain
 	private $allowed_grouping_modes;
 	private $non_scored_sortmodes;
 	private $hex_lookup_decode;
-	private $set_manually;
 	private $documents_in_collection;
 	private $index_state;
 	private $latest_indexing_done;
@@ -515,8 +514,7 @@ class PickMyBrain
 	
 	public function Search($query, $offset = 0, $limit = 10)
 	{
-		$start_time = microtime(true);
-		$this->query_start_time = $start_time;
+		$this->query_start_time = microtime(true);
 		
 		# reset query statistics
 		$this->result = array();
@@ -950,7 +948,7 @@ class PickMyBrain
 						"PMBCategories".$this->suffix);
 							
 			
-		$start_end_time = microtime(true) - $start_time;
+		$start_end_time = microtime(true) - $this->query_start_time;
 				
 		try
 		{
@@ -988,9 +986,9 @@ class PickMyBrain
 							$delta = $temp+$delta-1;
 							
 							# get the 6 least significant bits
-							$lowest6 = $temp & 63;
+							$lowest6 = $delta & 63;
 							# shift to right 6 bits
-							$tok_checksums[] = ($temp >> 6);	# checksum of the token that this prefix points to
+							$tok_checksums[] = ($delta >> 6);	# checksum of the token that this prefix points to
 							$tok_cutlens[] = $lowest6;
 							
 							# reset temp variables
@@ -1678,12 +1676,12 @@ class PickMyBrain
 	
 			if ( !empty($this->group_sort_attr) && strpos($this->group_sort_attr, "@") === false ) 
 			{
-				$wanted_attributes["attr_" . $this->group_sort_attr];
+				$wanted_attributes["attr_" . $this->group_sort_attr] = 1;
 			}
 			
 			if ( !empty($this->sort_attr) && strpos($this->sort_attr, "@") === false )
 			{
-				$wanted_attributes["attr_" . $this->sort_attr];
+				$wanted_attributes["attr_" . $this->sort_attr] = 1;
 			}
 			
 			$filter_by_sql_parts = array();
@@ -2196,7 +2194,7 @@ class PickMyBrain
 			return $this->result;	
 		}
 
-		$this->result["query_time"] = microtime(true) - $start_time;
+		$this->result["query_time"] = microtime(true) - $this->query_start_time;
 		
 		# finally, log query
 		$this->LogQuery($query, $this->result["total_matches"]);

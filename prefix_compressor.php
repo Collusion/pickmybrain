@@ -177,11 +177,6 @@ try
 			
 			foreach ( $combinations as $c_i => $integer )
 			{
-				if ( $expansion_limit <= $c_i+1 )
-				{
-					break;
-				}
-				
 				$tmp = $integer-$delta+1;
 				
 				do
