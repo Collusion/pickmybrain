@@ -1,7 +1,7 @@
 Pickmybrain
 -----------
 
-Version:   0.80 BETA ( initial release )
+Version:   0.81 BETA 
 Published: 19.05.2016
 
 copyright 2015-2016 Henri Ruutinen 
@@ -177,7 +177,7 @@ DELIMITER	delimiter, 0 (zero)
 doc_id_x_count	how many matches of current token in this document (SENTIMENT INDEXES: (count<<8) | sentiscore ) 
 pair_data_x	( next_token_id << field_bits ) 
 next_token_id	unique ID of the immediately following token, zero if current token is last of the field
-field_bits	in which fields this token pair is present, number of field bits = number if indexable columns
+field_bits	in which fields this token pair is present, number of field bits = number of indexable columns
 
 For decoding the data:
 1. run variable byte decode on the whole binary string
