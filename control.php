@@ -1226,6 +1226,7 @@ try
 			<input type='hidden' name='action' value='runindexer' />
 			<div style='width:100%;display:inline-block;position:relative;clear:both:float:left;'>
 				<input type='button' style='display:inline-block;position:absolute;right:0;top:0;' value='Search' onClick='TogglePMBSearch();' />
+				<div style='display:inline-block;position:absolute;right:15px;top:60px;color:#222;'>CTRL+Q</div>
 				<h3>Index name: <span class='green'>$index_name</span></h3>
 				<h3>Index type: <span class='grey'>$index_type_desc</span></h3>
 				<h3>Total indexed documents: $doc_count</h3>

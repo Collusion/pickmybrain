@@ -119,6 +119,8 @@ function keyword_check($url, array $wanted_keywords, array $non_wanted_keywords)
 
 function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &$indexable_columns = array())
 {
+	$e_count = 0;
+	
 	include("settings_".$index_id.".php");
 	require_once("db_connection.php");
 	
@@ -127,21 +129,30 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 	if ( $use_internal_db === 0 ) 
 	{
 		$ext_connection = $connection;
+		
+		if ( is_string($ext_connection) )
+		{
+			$log .= "Error: the internal database configuration seems to be invalid.\n";
+			$log .= "Following error message was received: $ext_connection \n";
+			++$e_count;
+		}
 	}
 	else
 	{
-		$ext_connection = call_user_func("db_connection_".$index_id."()", false);
+		# the external PDO connection is defined in this file
+		require "ext_db_connection_".$index_id.".php"; 
+		
+		# create a new instance of the connection
+		$ext_connection = call_user_func("ext_db_connection");
+		
+		if ( is_string($ext_connection) )
+		{
+			$log .= "Error: establishing the external database connection failed. Following error message was received: $ext_connection\n";
+			++$e_count;
+		}
 	}
 	
-	$e_count = 0;
-			
-	if ( is_string($ext_connection) )
-	{
-		$log .= "Error: the external database configuration seems to be invalid.\n";
-		$log .= "Following error message was outputted: $ext_connection \n";
-		++$e_count;
-	}
-	else if ( empty($main_sql_query) )
+	if ( empty($main_sql_query) )
 	{
 		$log .= "Error: the main SQL query is not defined. To start indexing, please define the SQL query.";
 		++$e_count;
@@ -362,6 +373,7 @@ function write_settings(array $settings, $index_id = 0)
 			{
 				$$setting_name = $setting_value;
 			}
+			break;
 			
 			case 'main_sql_attributes':
 			if ( isset($setting_value) )

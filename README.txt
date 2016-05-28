@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   0.81 BETA 
-Published: 26.05.2016
+Version:   0.82 BETA 
+Published: 28.05.2016
 
 copyright 2015-2016 Henri Ruutinen 
 
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS PMBPrefixes_X (
  checksum int(10) unsigned NOT NULL,
  tok_data mediumblob NOT NULL,
  PRIMARY KEY (checksum)
- ) ENGINE=InnoDB DEFAULT;
+ ) ENGINE=InnoDB;
 
 (The _X postfix indicates the index identification number)
 

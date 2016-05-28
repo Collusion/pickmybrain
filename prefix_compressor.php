@@ -85,9 +85,7 @@ try
 	{
 		$where_sql = "";
 	}
-	
-	$min_cutlen				= 0;
-	$min_tok_checksum		= 0;	
+		
 	$combinations 			= array();
 	$temp_sql 				= "";
 	$escape					= array();
@@ -144,11 +142,10 @@ try
 	$select_start = microtime(true);
 	$pdo = $unbuffered_connection->query("SELECT 
 								checksum,
-								cutlen,
-								token_checksum
+								(token_checksum << 6 | cutlen) as combined
 								FROM PMBpretemp$index_suffix
 								$where_sql
-								ORDER BY checksum, cutlen, token_checksum");		
+								ORDER BY checksum");		
 	$select_time += (microtime(true) - $select_start);						
 											
 	$rowcounter = 0;
@@ -163,8 +160,7 @@ try
 		++$rowcounter;
 		
 		$checksum 		= (int)$row["checksum"];
-		$cutlen 		= (int)$row["cutlen"];
-		$tok_checksum 	= (int)$row["token_checksum"]; 
+		$combined		= (int)$row["combined"];
 		
 		# different checksum ! 
 		if ( $min_checksum > $start_checksum && $checksum !== $min_checksum ) 
@@ -175,7 +171,7 @@ try
 			$delta = 1;
 			$bin_data = "";
 			
-			foreach ( $combinations as $c_i => $integer )
+			foreach ( $combinations as $integer )
 			{
 				$tmp = $integer-$delta+1;
 				
@@ -230,13 +226,11 @@ try
 			$combinations = array();
 		}
 		
-		$combinations[] = ($tok_checksum << 6) | $cutlen;
+		$combinations[] = $combined;
 
 		++$x;	
 		
 		$min_checksum 		= $checksum;
-		$min_cutlen 		= $cutlen;
-		$min_tok_checksum 	= $tok_checksum;
 		
 		if ( $rowcounter % 10000 === 0 ) 
 		{

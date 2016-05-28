@@ -33,9 +33,9 @@ function ext_db_connection($buffered = true)
 		
 		*/
 
-		$connection = new PDO(  USERNAME, 
+		$connection = new PDO(  OPTIONS, 
+								USERNAME, 
 								PASSWORD, 
-								OPTIONS, 
 								array(
 										PDO::ATTR_TIMEOUT 					=> 60, 
 										PDO::ATTR_ERRMODE 					=> PDO::ERRMODE_EXCEPTION, 

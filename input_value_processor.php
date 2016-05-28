@@ -39,14 +39,8 @@ if ( !empty($_GET) )
 	# include settings file
 	require_once("settings$index_suffix.php");
 	
-	if ( $use_internal_db === 0 ) 
-	{
-		require_once("db_connection.php");
-	}
-	else
-	{
-		require_once("db_connection$index_suffix.php");
-	}
+	# database connection
+	require_once("db_connection.php");
 	
 	if ( !empty($_GET["mode"]) && $_GET["mode"] === "usermode" && $_SERVER["REMOTE_ADDR"] === "127.0.0.1" ) 
 	{
@@ -143,14 +137,8 @@ else if ( !empty($argv) )
 	# include settings file
 	require_once("settings$index_suffix.php");
 	
-	if ( $use_internal_db === 0 ) 
-	{
-		require_once("db_connection.php");
-	}
-	else
-	{
-		require_once("db_connection$index_suffix.php");
-	}
+	# database connection
+	require_once("db_connection.php");
 }
 else
 {

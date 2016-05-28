@@ -224,14 +224,14 @@ try
 								".$senti_sql_column."
 								token_id_2 mediumint(10) unsigned NOT NULL,
 							 	KEY (checksum,token_id,doc_id,token_id_2,field_id,count ".$senti_sql_index_column.")
-								) $temporary_table_type");
+								) $temporary_table_type PACK_KEYS=1");
 			
 	if ( $clean_slate ) 
 	{				
 		$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
 							TRUNCATE TABLE PMBPrefixes$index_suffix;
-							ALTER TABLE PMBTokens$index_suffix ADD PRIMARY KEY (checksum, token), ENGINE=INNODB $innodb_row_format_sql;
-							ALTER TABLE PMBPrefixes$index_suffix ADD PRIMARY KEY (checksum), ENGINE=INNODB $innodb_row_format_sql");
+							ALTER TABLE PMBTokens$index_suffix ENGINE=INNODB $innodb_row_format_sql;
+							ALTER TABLE PMBPrefixes$index_suffix ENGINE=INNODB $innodb_row_format_sql");
 				
 		# create new temporary tables		   
 		$connection->exec("DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
@@ -250,7 +250,7 @@ try
 							token_checksum int(10) unsigned NOT NULL,
 							cutlen tinyint(3) unsigned NOT NULL,
 							KEY (checksum, cutlen, token_checksum)
-						) $temporary_table_type");
+						) $temporary_table_type PACK_KEYS=1");
 	}
 
 	# disable non-unique keys					 
