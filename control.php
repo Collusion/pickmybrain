@@ -134,6 +134,7 @@ $web_tokenizer_file_path 		= $folder_path . "/web_tokenizer.php";
 $db_tokenizer_file_path 		= $folder_path . "/db_tokenizer.php";
 $tokenizer_functions_file_path 	= $folder_path . "/tokenizer_functions.php";
 $settings_file_path 			= $folder_path . "/settings.php";
+$settings_loader_path			= $folder_path . "/autoload_settings.php";
 
 
 # 1. test if the database configuration file is readable
@@ -156,6 +157,18 @@ if ( !is_readable($settings_file_path) )
 
 	echo "<div class='errorbox'>
 			<h3 style='color:#ff0000;'>Error: settings file settings.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 2. test if the settings-loader file is readable
+if ( !is_readable($settings_loader_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($settings_loader_path)), -4);
+
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: settings loader file autoload_settings.php cannot be read.</h3>
 		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
 		  </div>";
 }
@@ -284,7 +297,7 @@ try
 	 name varbinary(20) NOT NULL,
 	 type tinyint(3) unsigned NOT NULL,
 	 comment varbinary(255) NOT NULL,
-	 documents mediumint(8) unsigned NOT NULL DEFAULT '0',
+	 documents int(10) unsigned NOT NULL DEFAULT '0',
 	 updated int(10) unsigned NOT NULL,
 	 indexing_permission tinyint(3) unsigned NOT NULL,
 	 indexing_started int(10) unsigned NOT NULL,
@@ -298,32 +311,49 @@ try
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8";
 	
 	try
-	{	
-		$pre_existing_indexes = array();
-		
+	{		
 		# table doesn't exist, create it ! 
 		if ( !$connection->query("SHOW TABLES LIKE 'PMBIndexes'")->rowCount() )
 		{
 			$connection->query($create_table["PMBIndexes"]);
-					
-			# store tables that have been created 
-			$created_tables["PMBIndexes"] = 1;
-		}
-		else
-		{
-			# check if any indexes are defined
-			$indexpdo = $connection->query("SELECT * FROM PMBIndexes ORDER BY ID ASC");
-				
-			while ( $row = $indexpdo->fetch(PDO::FETCH_ASSOC) )
-			{
-				$pre_existing_indexes[(int)$row["ID"]] = $row;
-			}
 		}
 	}
 	catch ( PDOException $e ) 
 	{
-		/* an error happened :/ */	
-		echo $e->getMessage();
+		++$errors;
+		echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: table PMBIndexes could not be created.</h3>
+			<p>".$e->getMessage()."</p>
+		  </div>";
+	}
+	
+	try
+	{	
+		$pre_existing_indexes = array();
+
+		# check if any indexes are defined
+		$indexpdo = $connection->query("SELECT * FROM PMBIndexes ORDER BY ID ASC");
+				
+		while ( $row = $indexpdo->fetch(PDO::FETCH_ASSOC) )
+		{
+			$pre_existing_indexes[(int)$row["ID"]] = $row;
+		}
+		
+	}
+	catch ( PDOException $e ) 
+	{
+		++$errors;
+		echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: unable to check existing indexes</h3>
+			<p>".$e->getMessage()."</p>
+		  </div>";
+	}
+	
+	if ( !empty($index_id) && !isset($pre_existing_indexes[(int)$index_id]) )
+	{
+		# if index id does not exist in the database, return to main menu
+		header("Location: control.php");
+		return;
 	}
 }
 catch ( PDOException $e ) 
@@ -386,7 +416,7 @@ if ( !empty($index_id) )
 {
 	$index_type = $pre_existing_indexes[(int)$index_id]["type"];
 	
-	if ( !is_readable($folder_path . "/settings_$index_id.php") )
+	if ( !is_readable($folder_path . "/settings_$index_id.txt") )
 	{
 		$dummy = array("index_type" => $index_type);
 		# create the settings file with default values for current index_id
@@ -399,8 +429,7 @@ if ( !empty($index_id) )
 	}
 	
 	# now, include the just created settings file
-	require("settings_$index_id.php");
-	
+	require("autoload_settings.php");
 }
 
 if ( !empty($_POST["action"]) && $_POST["action"] === "updatesettings" )
@@ -629,7 +658,7 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 				$connection->commit();
 									
 				# delete the settings file
-				@unlink("settings$index_suffix.php");
+				@unlink("settings$index_suffix.txt");
 				
 			}
 			catch ( PDOException $e ) 
@@ -736,9 +765,6 @@ if ( !empty($mysql_data_dir) && $innodb_file_per_table )
 {
 	$data_dir_sql = "DATA DIRECTORY = '$mysql_data_dir'";
 }
-
-$row_compression = "";
-
 
 /*
 	Show the welcome dialog if no index is selected or the provided index ID is incorrect
@@ -887,84 +913,20 @@ else
 # echo the index name into proprietary div-tag
 echo "<div id='pmb-index-name' data-index-name='$index_name'></div>";
 
-# web crawler
-if ( $index_type == 1 ) 
+$created_tables 			= array();
+$data_directory_warning 	= false;
+$general_database_errors 	= array();
+
+# create database tables ( if not already created ) 
+if ( !create_tables($index_id, $index_type, $created_tables, $data_directory_warning, $general_database_errors, $data_dir_sql) )
 {
-	$create_table["PMBDocinfo$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBDocinfo$index_suffix (
-	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-	 URL varbinary(500) NOT NULL,
-	 url_checksum binary(16) NOT NULL,
-	 token_count varchar(60) NOT NULL,
-	 avgsentiscore tinyint(4) DEFAULT '0',
-	 attr_category tinyint(3) unsigned DEFAULT NULL,
-	 field0 varbinary(255) NOT NULL,
-	 field1 varbinary(10000) NOT NULL,
-	 field2 varbinary(255) NOT NULL,
-	 field3 varbinary(255) NOT NULL,
-	 attr_timestamp int(10) unsigned NOT NULL,
-	 checksum binary(16) NOT NULL,
-	 attr_domain int(10) unsigned NOT NULL,
-	 PRIMARY KEY (ID),
-	 KEY cat_id (cat_id),
-	 KEY url_checksum (url_checksum)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
+	++$errors;
 }
-# other kind of index
-else
-{
-	$create_table["PMBDocinfo$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBDocinfo$index_suffix (
-	 ID int(11) unsigned NOT NULL,
-	 avgsentiscore tinyint(4) NOT NULL,
-	 PRIMARY KEY (ID),
-	 KEY avgsentiscore (avgsentiscore)	
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
-}
-
-$create_table["PMBTokens$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBTokens$index_suffix (
- checksum int(10) unsigned NOT NULL,
- token varbinary(40) NOT NULL,
- doc_matches int(8) unsigned NOT NULL,
- ID mediumint(10) unsigned NOT NULL,
- doc_ids mediumblob NOT NULL,
- PRIMARY KEY (checksum, token, doc_matches, ID)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
-
-$create_table["PMBCategories$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBCategories$index_suffix (
- ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
- keyword varchar(255) NOT NULL,
- name varchar(255) NOT NULL,
- count mediumint(8) unsigned NOT NULL DEFAULT 0,
- type tinyint(3) unsigned NOT NULL DEFAULT 0,
- PRIMARY KEY (ID),
- KEY keyword (keyword)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
-
-$create_table["PMBPrefixes$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBPrefixes$index_suffix (
- checksum int(10) unsigned NOT NULL,
- tok_data mediumblob NOT NULL,
- PRIMARY KEY (checksum)
- ) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
-
-$create_table["PMBQueryLog$index_suffix"] = "CREATE TABLE PMBQueryLog$index_suffix (
- ID int(10) unsigned NOT NULL AUTO_INCREMENT,
- timestamp int(10) unsigned NOT NULL,
- ip int(10) unsigned NOT NULL,
- query varbinary(255) NOT NULL,
- results mediumint(8) unsigned NOT NULL,
- searchmode tinyint(3) unsigned NOT NULL,
- querytime mediumint(8) unsigned NOT NULL,
- PRIMARY KEY (ID),
- KEY query (query),
- KEY ip (ip),
- KEY results (results),
- KEY querytime (querytime)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 $data_dir_sql";
 
 if ( is_readable("sentiment/pmbsentiment.php") )
 {
-		#realpath(dirname(__FILE__)) . "/
 		include("sentiment/pmbsentiment.php");
-		
+			
 		if ( class_exists("PMBSentiment") )
 		{
 			$sentiment_available = true;
@@ -979,71 +941,7 @@ else
 	# sentiment analysis enabled, but missing
 	$sentiment_available = false;
 }
-
-# 7. If there are no errors, check whether the database tables exist
-# if not, create the tables
-try
-{
-	$created_tables 			= array();
-	$data_directory_warning 	= false;
-	$general_database_errors 	= array();
-	$latest_sql = "";
-	$connection->beginTransaction();
 	
-	foreach ( $create_table as $table_name => $table_sql ) 
-	{
-		try
-		{
-			# table doesn't exist, create it ! 
-			if ( !$connection->query("SHOW TABLES LIKE '$table_name'")->rowCount() )
-			{
-				$connection->query($table_sql);
-				
-				# store tables that have been created 
-				$created_tables[$table_name] = 1;
-			}
-		}
-		catch( PDOException $e )
-		{
-			if ( !empty($data_dir_sql) )
-			{
-				# maybe the failure is because because a custom data directory is set ! 
-				# try againt without it
-				try
-				{
-					$connection->query(str_ireplace($data_dir_sql, "", $table_sql));
-					
-					# it went through, so the data directory is the problem ! 
-					$data_directory_warning = $e->getMessage();
-					
-					# store tables that have been created 
-					$created_tables[$table_name] = 1;
-				}
-				catch ( PDOException $e ) 
-				{
-					# general database error
-					$general_database_errors[] = $e->getMessage();
-					++$errors;
-				}
-			}
-			else
-			{
-				# general database error
-				$general_database_errors[] = $e->getMessage();
-				++$errors;
-			}
-		}
-		
-	}
-	
-	$connection->commit();
-}
-catch ( PDOException $e ) 
-{
-	$connection->rollBack();
-	$general_database_errors[] = $e->getMessage();
-}
-
 # check for errors during table creation
 if ( !empty($general_database_errors) ) 
 {
@@ -1299,19 +1197,8 @@ else
 	$quality_scoring_0 = "checked";
 }
 
-/*
-$forgive_keywords_0 = $forgive_keywords_1 = "";
-if ( $forgive_keywords )
-{
-	 $forgive_keywords_1 = "checked";
-}
-else
-{
-	$forgive_keywords_0 = "checked";
-}*/
-
 $honor_nofollows_0 = $honor_nofollows_1 = "";
-if ( $honor_nofollows )
+if ( !empty($honor_nofollows) )
 {
 	 $honor_nofollows_1 = "checked";
 }
@@ -1341,7 +1228,7 @@ else
 }
 
 $use_localhost_0 = $use_localhost_1 = "";
-if ( $use_localhost )
+if ( !empty($use_localhost) )
 {
 	 $use_localhost_1 = "checked";
 }
@@ -1361,7 +1248,7 @@ else
 }
 
 $index_pdfs_0 = $index_pdfs_1 = "";
-if ( $index_pdfs )
+if ( !empty($index_pdfs) )
 {
 	 $index_pdfs_1 = "checked";
 }
@@ -1371,15 +1258,15 @@ else
 }
 
 $sentiment_analysis_0 = $sentiment_analysis_1 = $sentiment_analysis_2 = $sentiment_analysis_1001 = "";
-if ( $sentiment_analysis === 2 && $sentiment_available )
+if ( $sentiment_analysis == 2 && $sentiment_available )
 {
 	 $sentiment_analysis_2 = "checked";
 }
-else if ( $sentiment_analysis === 1 && $sentiment_available )
+else if ( $sentiment_analysis == 1 && $sentiment_available )
 {
 	 $sentiment_analysis_1 = "checked";
 }
-else if ( $sentiment_analysis === 1001 && $sentiment_available )
+else if ( $sentiment_analysis == 1001 && $sentiment_available )
 {
 	 $sentiment_analysis_1001 = "checked";
 }
@@ -1406,7 +1293,7 @@ else
 }
 
 $allow_subdomains_0 = $allow_subdomains_1 = "";
-if ( $allow_subdomains )
+if ( !empty($allow_subdomains) )
 {
 	 $allow_subdomains_1 = "checked";
 }
@@ -1426,7 +1313,7 @@ else
 }
 
 $use_internal_db_0 = $use_internal_db_1 = "";
-if ( $use_internal_db )
+if ( !empty($use_internal_db) )
 {
 	$use_internal_db_1 = "checked";
 }
@@ -1436,7 +1323,7 @@ else
 }
 
 $use_buffered_queries_0 = $use_buffered_queries_1 = "";
-if ( $use_buffered_queries )
+if ( !empty($use_buffered_queries) )
 {
 	$use_buffered_queries_1 = "checked";
 }
@@ -1446,7 +1333,7 @@ else
 }
 
 $html_strip_tags_0 = $html_strip_tags_1 = "";
-if ( $html_strip_tags )
+if ( !empty($html_strip_tags) )
 {
 	$html_strip_tags_1 = "checked";
 }
@@ -1524,9 +1411,9 @@ switch ( $innodb_row_format )
     	However, if you need to use a different database, please make a copy of the file "ext_db_connection.php" and rename it as "<?php echo "ext_db_connection_" . $index_id . ".php"; ?>" ( for this particular index ). After renaming the copied file, open it and edit the login credentials and settings according to your target database's. <br>Notice: As the database is connected through PHP's PDO abstraction layer, also other databases than MySQL are supported. See all supported databases <a href='http://php.net/manual/en/pdo.drivers.php'>here</a>.
     </p>
      <p>
-   		<input type="radio" name="use_internal_db" value="0" <?php echo $use_internal_db_0; ?> /> Same as Pickmybrain
+   		<input type="radio" name="use_internal_db" value="1" <?php echo $use_internal_db_1; ?> /> Same as Pickmybrain
         <br />
-        <input type="radio" name="use_internal_db" value="1" <?php echo $use_internal_db_1; ?> /> Different database <span class='cyan'>( defined in "<?php echo "ext_db_connection_" . $index_id . ".php"; ?>" )</span> 
+        <input type="radio" name="use_internal_db" value="0" <?php echo $use_internal_db_0; ?> /> Different database <span class='cyan'>( defined in "<?php echo "ext_db_connection_" . $index_id . ".php"; ?>" )</span> 
     </p>
 </div>
 
@@ -1563,7 +1450,7 @@ switch ( $innodb_row_format )
         Please separate the attributes with a line break and make sure, that the names are exact matches of those in the SQL-query.
     </p>
     <p>
-    	<textarea name="main_sql_attributes" placeholder="Optional attributes" style='width:50%;height:200px;'><?php print_r(implode("\n", $main_sql_attrs)); ?></textarea>
+    	<textarea name="main_sql_attrs" placeholder="Optional attributes" style='width:50%;height:200px;'><?php print_r(implode("\n", $main_sql_attrs)); ?></textarea>
     </p>
 </div>
 
@@ -1737,7 +1624,7 @@ switch ( $innodb_row_format )
     <p>
     	 Example: Character set <b>0-9a-zöäå#</b> will match all numbers between 0-9, letters between a-z and additional characters of <b>ö, ä, å</b> and <b>#</b>.
     </p>
-    <p><input name='character_set' type='text' value='<?php echo htmlentities($charset, ENT_QUOTES); ?>'  style='width:350px;'  /></p>
+    <p><input name='charset' type='text' value='<?php echo htmlentities($charset, ENT_QUOTES); ?>'  style='width:350px;'  /></p>
 </div>
 
 <div class='settingsbox'>
@@ -1839,21 +1726,7 @@ switch ( $innodb_row_format )
         Outcome: <b>My photo page</b>
     </p>
     <p>
-    	<?php
-		
-		for ( $i = 0 ; $i < 3 ; ++$i ) 
-		{
-			$trim_value = "";
-			if ( !empty($trim_page_title[$i]) )
-			{
-				$trim_value = $trim_page_title[$i];
-			}
-			
-			echo "<input name='trim_page_title_$i' type='text' value='" . htmlentities($trim_value, ENT_QUOTES) . "' placeholder='Trim value#".($i+1)."' style='width:350px;'/><br />";
-		}
-		
-		?>
-    	
+          <textarea name="trim_page_title" placeholder="Insert one trim value per line" style='width:50%;height:200px;'><?php print_r(implode("\n", $trim_page_title)); ?></textarea>
     </p>
 </div>
 
@@ -1896,7 +1769,9 @@ switch ( $innodb_row_format )
     <p>
     	<?php
 
-		if ( !empty($field_weights) )
+		$non_empty_count = count(array_filter($field_weights));
+
+		if ( $non_empty_count > 0 )
 		{
 			foreach ( $field_weights as $field_name => $field_weight ) 
 			{

@@ -29,32 +29,6 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 }
 
-$innodb_row_format_sql = "";
-if ( isset($innodb_row_format) )
-{
-	switch ( $innodb_row_format ) 
-	{
-		case 0;
-		$innodb_row_format_sql = "ROW_FORMAT=COMPACT";
-		break;
-		case 1;
-		$innodb_row_format_sql = "ROW_FORMAT=REDUNDANT";
-		break;
-		case 2;
-		$innodb_row_format_sql = "ROW_FORMAT=DYNAMIC";
-		break;
-		case 3;
-		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16";
-		break;
-		case 4;
-		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8";
-		break;
-		case 5;
-		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4";
-		break;
-	}
-}
-
 register_shutdown_function("shutdown", $index_id, $process_number);
 
 define("CHARSET_REGEXP", "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "]/u");
@@ -162,7 +136,44 @@ try
 	$connection = db_connection();
 	$connection->query("SET NAMES UTF8");
 	
-	if ( $use_internal_db === 0 ) 
+	$clean_slate = true;
+	
+	if ( $process_number === 0 ) 
+	{
+		$ind_state = $connection->query("SELECT current_state, updated, documents FROM PMBIndexes WHERE ID = $index_id");
+		
+		if ( $row = $ind_state->fetch(PDO::FETCH_ASSOC) )
+		{
+			if ( $row["current_state"] ) 
+			{
+				# abort, because indexer is already running !  
+				die("already running");
+			}
+			# lastest indexing timestamp
+			else if ( $indexing_interval && time()-($indexing_interval*60) > (int)$row["updated"] && !$user_mode && !$test_mode )  
+			{
+				die("too soon");
+			}
+			
+			if ( $row["documents"] > 0 ) 
+			{
+				$clean_slate = false;
+			}
+		}
+		else
+		{
+			die("Incorrent index \n");
+		}
+		
+		# update current indexing state to true ( 1 ) 
+		SetIndexingState(1, $index_id);
+		
+		# update statistics
+		$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP(), comment = '' WHERE ID = ?");
+		$upd_state->execute(array($index_id));
+	}
+	
+	if ( $use_internal_db === 1 ) 
 	{
 		# create nex connection for reading the data
 		$ext_connection = db_connection();
@@ -218,43 +229,10 @@ try
 	$extra_total_time = 0;
 	$docinfo_extra_time = 0;
 	$token_stat_time = 0;
-	$clean_slate = true;
 	
 	# do not run diagnostics & formatting unless we are in master process
 	if ( $process_number === 0 ) 
 	{
-		$ind_state = $connection->query("SELECT current_state, updated, documents FROM PMBIndexes WHERE ID = $index_id");
-		
-		if ( $row = $ind_state->fetch(PDO::FETCH_ASSOC) )
-		{
-			if ( $row["current_state"] ) 
-			{
-				# abort, because indexer is already running !  
-				die("already running");
-			}
-			# lastest indexing timestamp
-			else if ( $indexing_interval && time()-($indexing_interval*60) > (int)$row["updated"] && !$user_mode && !$test_mode )  
-			{
-				die("too soon");
-			}
-			
-			if ( $row["documents"] > 0 ) 
-			{
-				$clean_slate = false;
-			}
-		}
-		else
-		{
-			die("Incorrent index \n");
-		}
-		
-		$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP(), comment = '' WHERE ID = ?");
-		$upd_state->execute(array($index_id));
-	
-		# update current indexing state to true ( 1 ) 
-		SetIndexingPermission(1, $index_id);
-		SetIndexingState(1, $index_id);
-		
 		# truncate and create temporary tables
 		if ( !$test_mode )
 		{
@@ -311,8 +289,6 @@ try
 			
 		}
 							
-		
-		
 		$log .= "\n";
 
 		# if test mode is on
@@ -330,7 +306,9 @@ try
 }
 catch ( PDOException $e ) 
 {
-	echo $e->getMessage();
+	echo "Something went wrong when creating temporary tables: \n";
+	echo $e->getMessage() . "\n";
+	return;
 }
 
 /* 
@@ -404,8 +382,6 @@ if ( $process_number === 0 )
 		
 		echo "Something went wrong while proofing PMBDocmatches \n";
 		echo $e->getMessage();
-		#echo "\nRequired operations: \n";
-		#print_r($alter_operations);
 	}
 }
 
@@ -1065,6 +1041,13 @@ try
 
 		$log .= "new word occurances ok \n";
 		$loop_log .= "new word occurances ok \n";	
+		
+		# update temporary statistics
+		$connection->query("UPDATE PMBIndexes SET 
+							temp_loads = temp_loads + $awaiting_writes,
+							updated = UNIX_TIMESTAMP(),
+							documents = documents + $awaiting_writes
+							WHERE ID = $index_id");
 	}
 }
 catch ( PDOException $e ) 
@@ -1107,7 +1090,6 @@ if ( $documents === 0 )
 {
 	# no documents processed, no reason to continue!
 	SetIndexingState(0, $index_id);
-	SetIndexingPermission(0, $index_id);
 	SetProcessState($index_id, $process_number, 0);	
 	die( "No documents processed, quitting now.. \n" );
 }
@@ -1211,7 +1193,6 @@ if ( $test_mode )
 
 # update current indexing state to false ( 0 ) 
 SetIndexingState(0, $index_id);
-SetIndexingPermission(0, $index_id);
 SetProcessState($index_id, $process_number, 0);	
 
 

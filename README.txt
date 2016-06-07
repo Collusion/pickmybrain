@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   0.82 BETA 
-Published: 28.05.2016
+Version:   0.83 BETA 
+Published: 07.06.2016
 
 copyright 2015-2016 Henri Ruutinen 
 
@@ -45,11 +45,14 @@ web site:
 Compatibility
 -------------
 
+In short:
+- PHP >= 5.3 (x64 built)
+- MySQL >= 5.1 ( or equivalent )
+
 Pickmybrain is developed and tested on Linux. More specifically
 on 64-bit version of Ubuntu 14.04.1 LTS. Pickmybrain requires 64bit
-built of the PHP programming language, a MySQL database ( or a database 
-that supports similar SQL syntax and table structures ) and a web server
-( because how the user interface is implemented ) to work. Pickmybrain 
+built of the PHP programming language and a MySQL database ( or a database 
+that supports similar SQL syntax and table structures ). Pickmybrain 
 should work on other operating systems as well.
 
 In theory, Pickmybrain should work with PHP version of 5.3 and MySQL version
@@ -71,23 +74,41 @@ Installation
 ------------
 
 To install Pickmybrain, please unzip the contents and place them into
-a new folder. Open the file named control.php with a web browser, log in
+a new folder. 
+
+
+How to configure
+----------------
+
+You have two options:
+
+1. Open the file named control.php with a web browser, log in
 with default user credentials ( defaultuser , defaultpass ) and then
-follow the instructions. 
+follow the instructions. Do not forget to change the password in 
+password.php, if you do not intend to implement any extra security.
 
-Do not forget to change the password in password.php, if you do not 
-intend to implement any extra security.
+OR
+
+2. Run the file clisetup.php from the command line. First create a
+new index and then manually edit the automatically created 
+configuration file ( settings_INDEXID.txt ). 
+
+For database indexes: 
+After you have finished configuring the settings, please open the 
+clisetup.php again and run 'Compile index settings' to finish
+the process.
 
 
-How to use
-----------
+How to run the indexer
+----------------------
 
-For detailed instructions, please view the Pickmybrain API documentation 
-in http://www.pickmybra.in/api.php
+You have two options:
 
-The indexer can also be invoked from command line in the following manner:
+1. In the web-based control panel ( control.php ), press 'Run indexer'.
 
-php /path/to/pickmybrain/indexer.php index_id=myindexnumber 
+OR
+
+2. From the command line: php /path/to/indexer.php index_id=myindexid 
 
 extra parameters:
 	usermode ( ignores indexing intervals )
@@ -95,12 +116,33 @@ extra parameters:
 	testmode ( checks index configuration for errors )
 
 
+How to search
+-------------
+
+Basically you have two options for embedding Pickmybrain
+into your own application:
+
+1. For PHP applications, use the Pickmybrain API.
+
+For detailed instructions, please view the Pickmybrain API documentation 
+in http://www.pickmybra.in/api.php
+
+2. You can also search from the command line and thus use Pickmybrain
+with other programming languages as well. Please run the file
+clisearch.php and follow the instructions.
+
+The Pickmybrain API has been already implemented into the web-based control
+panel and it allows you to search pre-configured indexes. Open the 
+index you want to search and press the 'Search' button or alternatively 
+Ctrl+Q from your keyboard.
+
+
 Upgrading from previous versions
 --------------------------------
 
-Unzip the new files and simply overwrite the old ones. Deleting the
-index-specific configuration files ( settings_x.php ) is not necessary.
-
+Unzip the new files and simply overwrite the old ones. Please delete 
+deprecated configuration files ( settings_x.php ) as they have 
+been replaced with more approachable .txt files ( settings_x.txt ). 
 
 Bugs
 ----
@@ -113,6 +155,9 @@ possible.
 File purpose definitions
 ------------------------
 
+autoload_settings.php		Loads and parses .txt configuration files
+clisetup.php			command-line control panel
+clisearch.php			command-line search utility
 control.php             	the web control panel
 db_connection.php		this file defines how PHP is supposed to connect to your database
 db_tokenizer.php		database indexer		
@@ -122,6 +167,7 @@ input_value_processor.php	processes parameters for indexer, db_tokenizer and web
 livesearch.php			PHP backend file for the live search feature
 loginpage.php			Provides additional security for the web-based control panel
 password.php			Defines username/password for the web-based control panel
+PMBApi.php			PHP Application Programming Interface
 prefix_composer.php		fetches all tokens after indexing and creates prefixes if necessary
 prefix_compressor.php		fetches temp prefix data, compresses it and inserts again into db
 process_listener.php		if multiprocessing is enabled, this file waits for all processes to finish

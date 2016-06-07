@@ -14,7 +14,7 @@ if( !defined('SPL_EXISTS') )
     define("SPL_EXISTS", class_exists("SplFixedArray"));
 }
 
-ini_set('memory_limit', '3072M');
+ini_set('memory_limit', '1024M');
 
 $supported_commands = array("index_id" 			=> 1,
 							"testmode" 			=> 1,
@@ -37,7 +37,7 @@ if ( !empty($_GET) )
 	}
 	
 	# include settings file
-	require_once("settings$index_suffix.php");
+	require_once("autoload_settings.php");
 	
 	# database connection
 	require_once("db_connection.php");
@@ -135,7 +135,7 @@ else if ( !empty($argv) )
 	}
 	
 	# include settings file
-	require_once("settings$index_suffix.php");
+	require_once("autoload_settings.php");
 	
 	# database connection
 	require_once("db_connection.php");
@@ -144,7 +144,6 @@ else
 {
 	die("Incorrect parameters provided.");
 }
-
 
 if ( !empty($sentiment_analysis) ) 
 {
@@ -192,7 +191,42 @@ if ( !empty($sentiment_analysis) )
 		$log .= "NOTICE: Sentiment analysis is enabled, but the required library is missing. This feature will not work.\n";
 		$sentiment_analysis = 0;
 	}
-	
+}
+
+$innodb_row_format_sql = "";
+if ( isset($innodb_row_format) )
+{
+	switch ( $innodb_row_format ) 
+	{
+		case 0;
+		$innodb_row_format_sql = "ROW_FORMAT=COMPACT";
+		break;
+		case 1;
+		$innodb_row_format_sql = "ROW_FORMAT=REDUNDANT";
+		break;
+		case 2;
+		$innodb_row_format_sql = "ROW_FORMAT=DYNAMIC";
+		break;
+		case 3;
+		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16";
+		break;
+		case 4;
+		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8";
+		break;
+		case 5;
+		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4";
+		break;
+	}
+}
+
+# special case
+# 1. alternative script execution method is selected
+# 2. indexer is launched via command line
+# 3. but document root is not defined ( index is created with the cli tool )
+# => enable script execution through exec()
+if ( !$enable_exec && !empty($argv) && empty($document_root) ) 
+{
+	$enable_exec = 1;
 }
 
 ?>

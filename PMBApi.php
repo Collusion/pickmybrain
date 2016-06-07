@@ -146,13 +146,8 @@ class PickMyBrain
 	# loads the settings defined for this particular index
 	private function LoadSettings($index_id)
 	{
-		if ( !is_readable(realpath(dirname(__FILE__)) . "/settings_$index_id.php") )
-		{
-			return false;
-		}
-		
-		# require correct settings file
-		require "settings_$index_id.php";
+		# include settings file
+		require_once("autoload_settings.php");
 		
 		# there settings are not index specific
 		$this->sortmode				= PMB_SORTBY_RELEVANCE; 	# default
@@ -160,8 +155,7 @@ class PickMyBrain
 		$this->groupmode			= PMB_GROUPBY_DISABLED; 	# default
 		$this->matchmode			= PMB_MATCH_ALL; 			# default
 		
-		# these settings are index specific
-		$this->field_weights 		= $field_weights;
+		# these settings are index specific		
 		$this->sentiweight			= $sentiweight;
 		$this->keyword_stemming 	= $keyword_stemming;
 		$this->dialect_matching 	= $dialect_matching;
@@ -179,9 +173,14 @@ class PickMyBrain
 		$this->current_index		= $index_id;
 		$this->number_of_fields		= $number_of_fields;
 		$this->lsbits				= pow(2, $number_of_fields)-1;
-		$this->main_sql_attrs       = $main_sql_attrs;
 		$this->sentiment_analysis	= $sentiment_analysis;
 		$this->data_columns			= $data_columns;
+		$this->field_weights 		= $field_weights;
+		
+		if ( isset($main_sql_attrs) )
+		{
+			$this->main_sql_attrs	= $main_sql_attrs;
+		}
 
 		if ( $dialect_matching ) 
 		{
@@ -191,6 +190,14 @@ class PickMyBrain
 			$this->mass_replace		= array_values($dialect_array);
 		}
 		
+		if ( !empty($this->field_weights) )
+		{
+			foreach ( $this->field_weights as $fi => $field_weight )
+			{
+				$this->field_weights[$fi] = (int)$field_weight;
+			}
+		}
+
 		return true;
 	}
 	
@@ -294,7 +301,7 @@ class PickMyBrain
 			$this->log_queries = false;
 		}
 	}
-	
+		
 	private function execInBackground($cmd) 
 	{
 		if ( substr(php_uname(), 0, 7) == "Windows" )
@@ -313,7 +320,7 @@ class PickMyBrain
 		if ( empty($async) )
 		{
 			$async 		= false;
-			$timeout 	= 10;
+			$timeout 	= 10000;
 		}
 		
 		$options = array(
@@ -324,7 +331,7 @@ class PickMyBrain
 			CURLOPT_USERAGENT      	=> "localhost",   
 			CURLOPT_AUTOREFERER    	=> true,     
 			CURLOPT_CONNECTTIMEOUT 	=> 10,      
-			CURLOPT_TIMEOUT        	=> $timeout,      
+			CURLOPT_TIMEOUT_MS 		=> $timeout,      
 			CURLOPT_FRESH_CONNECT 	=> $async
 		);
 	
@@ -533,7 +540,14 @@ class PickMyBrain
 			return $this->result;	
 		}
 		
-		$main_sql_attrs = array_flip($this->main_sql_attrs);
+		if ( !empty($this->main_sql_attrs) )
+		{
+			$main_sql_attrs = array_flip($this->main_sql_attrs);
+		}
+		else
+		{
+			$main_sql_attrs = array();
+		}
 		
 		# attribute based grouping enabled
 		# check that proper attributes have been provided
@@ -2313,7 +2327,7 @@ class PickMyBrain
 	
 	public function SetGroupBy($mode, $attribute = "", $groupsort = "")
 	{
-		if ( (int)$mode === $mode && $mode >= 1 && $mode <= 3) 
+		if ( (int)$mode === $mode && $mode >= 1 && $mode <= 2) 
 		{
 			if ( $mode === PMB_GROUPBY_ATTR )
 			{
@@ -2745,10 +2759,7 @@ class PickMyBrain
 			
 			$highlight_words = array_flip(array_flip($highlight_words));
 		}
-		
-		
-		#print_r($highlight_words);
-	
+
 		# does the searchwindow need to be narrowed ? 
 		if ( $string_len > $max_len )
 		{

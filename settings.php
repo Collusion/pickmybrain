@@ -15,12 +15,6 @@
 */
 
 # indexer
-$dialect_replacing	= array (
-  'ö' => 'o',
-  'ä' => 'a',
-  'å' => 'a',
-  '$' => 's',
-);
 $seed_urls			= array ();
 $indexing_interval 	= 60;
 $update_interval 	= 1440;

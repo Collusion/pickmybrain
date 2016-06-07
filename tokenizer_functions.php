@@ -121,12 +121,12 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 {
 	$e_count = 0;
 	
-	include("settings_".$index_id.".php");
+	include "autoload_settings.php";
 	require_once("db_connection.php");
 	
 	$connection = db_connection();
 	
-	if ( $use_internal_db === 0 ) 
+	if ( $use_internal_db === 1 ) 
 	{
 		$ext_connection = $connection;
 		
@@ -170,7 +170,7 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 			$main_sql_query .= " LIMIT 5";
 		}
 		
-		if ( !empty($main_sql_attrs) )
+		if ( !empty($main_sql_attrs) && !empty($main_sql_attrs[0]) )
 		{	
 			# create reversed attribute list
 			$reverse_attributes = array_count_values($main_sql_attrs);
@@ -182,7 +182,7 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 			{
 				$main_sql_copy = mb_substr($main_sql_copy, 0, $lastpos);
 			}
-			
+
 			# each attribute must be found from the main SQL query
 			foreach ( $main_sql_attrs as $attr ) 
 			{
@@ -311,13 +311,6 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 
 function write_settings(array $settings, $index_id = 0)
 {	
-	# for dialect replacing
-	$dialect_array = array( 'š'=>'s', 'ž'=>'z', 'à'=>'a', 'á'=>'a', 'â'=>'a', 'ã'=>'a', 'ä'=>'a', 'å'=>'a', 'æ'=>'a', 'ç'=>'c', 'č'=>'c', 'è'=>'e', 'é'=>'e', 
-							'ê'=>'e', 'ë'=>'e', 'ì'=>'i', 'í'=>'i', 'î'=>'i', 'ï'=>'i', 'ð'=>'d', 'ñ'=>'n', 'ò'=>'o', 'ó'=>'o', 'ô'=>'o', 'õ'=>'o',
-                            'ö'=>'o', 'ø'=>'o', 'ù'=>'u', 'ú'=>'u', 'û'=>'u', 'μ' => 'u', 'ý'=>'y', 'þ'=>'b', 'ÿ'=>'y', '$' => 's', 'ü' => 'u' , 'ş' => 's',
-							'ş' => 's', 'ğ' => 'g', 'ı' => 'i', 'ǐ' => 'i', 'ǐ' => 'i', 'ĭ' => 'i', 'ḯ' => 'i', 'ĩ' => 'i', 'ȋ' => 'i' );	
-	$temp_dialect_array = $dialect_array;
-	
 	$index_suffix = "";
 	if ( !empty($index_id) )
 	{
@@ -325,10 +318,10 @@ function write_settings(array $settings, $index_id = 0)
 	}
 
 	# check if the current settings-file pre-exists
-	if ( is_readable(realpath(dirname(__FILE__)) . "/settings$index_suffix.php") )
+	if ( is_readable(realpath(dirname(__FILE__)) . "/settings$index_suffix.txt") )
 	{
 		# use these values as base-values
-		include "settings$index_suffix.php"; 
+		include "autoload_settings.php";
 	}
 	else
 	{
@@ -340,7 +333,7 @@ function write_settings(array $settings, $index_id = 0)
 	if ( $index_type == 2 ) 
 	{
 		$previous_main_sql_query = $main_sql_query;
-		$previous_main_sql_attrs = implode("\n", $main_sql_attrs);
+		$previous_main_sql_attrs = $main_sql_attrs;
 	}
 		
 	# reset arrays ( if updating all settings ) 
@@ -375,7 +368,7 @@ function write_settings(array $settings, $index_id = 0)
 			}
 			break;
 			
-			case 'main_sql_attributes':
+			case 'main_sql_attrs':
 			if ( isset($setting_value) )
 			{
 				$main_sql_attrs = array();
@@ -473,12 +466,23 @@ function write_settings(array $settings, $index_id = 0)
 						}
 					}
 				}
-				
+
 				foreach ( $old_data_columns as $i => $old_column_name ) 
 				{
-					if ( !in_array($old_column_name, $data_columns) )
+					if ( !in_array($old_column_name, $data_columns, true) )
 					{
 						unset($field_weights[$old_column_name]);
+					}
+				}
+				
+				if ( !empty($field_weights) )
+				{
+					foreach ( $field_weights as $field_name => $field_weight ) 
+					{
+						if ( !in_array($field_name, $data_columns, true) )
+						{
+							unset($field_weights[$field_name]);
+						}
 					}
 				}
 			}
@@ -554,37 +558,31 @@ function write_settings(array $settings, $index_id = 0)
 				}				
 			}
 			break;
-			
-			case 'trim_page_title_0':
-			case 'trim_page_title_1':
-			case 'trim_page_title_2':
-			if ( isset($setting_value) && $setting_value != "" )
+
+			case 'trim_page_title':
+			if ( isset($setting_value) )
 			{
-				$trim_page_title[] = $setting_value;
+				$trim_page_title = array();
+				if ( !empty($setting_value) )
+				{
+					$expl = explode("\n", $setting_value);
+					
+					foreach ( $expl as $attr ) 
+					{
+						$attr = trim($attr);
+						if ( !empty($attr) )
+						{
+							$trim_page_title[] = $attr;
+						}
+					}
+				}				
 			}
 			break;
 			
-			case 'character_set':
+			case 'charset':
 			if ( isset($setting_value[0]) )
 			{
 				$charset = mb_strtolower($setting_value);
-				
-				# at the same time, generate the dialect array
-				$charset_array = str_to_array($charset);
-				
-				if ( !empty($charset_array) )
-				{
-					foreach ( $charset_array as $char ) 
-					{
-						if ( !empty($dialect_array[$char]) )
-						{
-							$dialect_replacing[$char] = $dialect_array[$char];
-							
-							# unset index from dialect array
-							unset($dialect_array[$char]);
-						}
-					}
-				}
 			}
 			break;
 			
@@ -600,13 +598,6 @@ function write_settings(array $settings, $index_id = 0)
 				}
 				
 				$$setting_name = $arr;
-			}
-			break;
-
-			case 'prefix':
-			if ( isset($setting_value) && $setting_value <= 3 && $setting_value >= 0 )
-			{
-				$prefix_mode = $setting_value;
 			}
 			break;
 			
@@ -652,58 +643,9 @@ function write_settings(array $settings, $index_id = 0)
 			case 'enable_exec':
 			case 'sentiweight':
 			case 'allow_subdomains':
-			if ( isset($setting_value) && $setting_value <= 1 && $setting_value >= 0 )
-			{
-				$$setting_name = $setting_value;
-			}
-			break;
-			
 			case 'index_pdfs':
 			if ( isset($setting_value) && $setting_value <= 1 && $setting_value >= 0 )
 			{
-				if ( $setting_value )
-				{
-					# check os type
-					$xpdf_filetype = "";
-					$uname = strtolower(php_uname());
-					if ( strpos($uname, "darwin") !== false ) 
-					{
-						// It's OSX
-						$xpdf_folder = "xpdf_mac/";
-					} 
-					else if ( strpos($uname, "win") !== false ) 
-					{
-						// It's windows
-						$xpdf_folder = "xpdf_win/";
-						$xpdf_filetype = ".exe";
-					} 
-					else if ( strpos($uname, "linux") !== false) 
-					{
-						// It's Linux
-						$xpdf_folder = "xpdf_linux/";
-					}
-					
-					if ( !empty($xpdf_folder) )
-					{
-						if ( PHP_INT_SIZE === 8 ) 
-						{
-							# OS seems to be 64 bit
-							$xpdf_folder_bit = "bin64/";
-						}
-						else 
-						{
-							# OS seems to be 32 bit
-							$xpdf_folder_bit = "bin32/";
-						}
-						
-						$xpdf_folder = $xpdf_folder . $xpdf_folder_bit . "pdftotext" . $xpdf_filetype;
-					}
-				}
-				else
-				{
-					$xpdf_folder = "";
-				}
-				
 				$$setting_name = $setting_value;
 			}
 			break;
@@ -928,7 +870,47 @@ function write_settings(array $settings, $index_id = 0)
 	{
 		echo $e->getMessage();	
 	}
+
+	# Setup the xpdf filepath
+	$xpdf_filetype = "";
+	$uname = strtolower(php_uname());
+	if ( strpos($uname, "darwin") !== false ) 
+	{
+		// It's OSX
+		$xpdf_folder = "xpdf_mac/";
+	} 
+	else if ( strpos($uname, "win") !== false ) 
+	{
+		// It's windows
+		$xpdf_folder = "xpdf_win/";
+		$xpdf_filetype = ".exe";
+	} 
+	else if ( strpos($uname, "linux") !== false) 
+	{
+		// It's Linux
+		$xpdf_folder = "xpdf_linux/";
+	}
 	
+	if ( !empty($xpdf_folder) )
+	{
+		if ( PHP_INT_SIZE === 8 ) 
+		{
+			# OS seems to be 64 bit
+			$xpdf_folder_bit = "bin64/";
+		}
+		else 
+		{
+			# OS seems to be 32 bit
+			$xpdf_folder_bit = "bin32/";
+		}
+		
+		$xpdf_folder = $xpdf_folder . $xpdf_folder_bit . "pdftotext" . $xpdf_filetype;
+	}
+	else
+	{
+		$xpdf_folder = "";
+	}
+
 	# if this is a web crawler index, a fixed amount of fields is present
 	if ( $index_type == 1 ) 
 	{
@@ -938,107 +920,137 @@ function write_settings(array $settings, $index_id = 0)
 	}
 	
 	# if localhosting is disabled, empty custom address
-	if ( !$use_localhost )
+	if ( isset($use_localhost) && $use_localhost == 0 )
 	{
 		$custom_address = "";
 	}
 	
-	# if dialect processing disabled, empty dialect data
-	if ( !$dialect_processing ) 
+	$document_root = "";
+	if ( !empty($_SERVER["DOCUMENT_ROOT"]) )
 	{
-		$dialect_replacing = array();
-		$dialect_array = $temp_dialect_array; # reset dialect array
+		$document_root = $_SERVER["DOCUMENT_ROOT"];
+	}
+			
+	if ( $index_type == 1 ) 
+	{
+		$beginning = "
+; web-crawler indexes
+" . ini_array_value_export("seed_urls", $seed_urls) . "
+allow_subdomains		= $allow_subdomains
+honor_nofollows			= $honor_nofollows
+use_localhost			= $use_localhost
+custom_address			= \"$custom_address\"
+url_keywords			= \"$url_keywords\"
+index_pdfs			= $index_pdfs
+" . ini_array_value_export("trim_page_title", $trim_page_title) . "";
+
+	}
+	else
+	{
+		$beginning = "
+; database indexes
+use_internal_db			= $use_internal_db
+main_sql_query			= \"$main_sql_query\"
+".ini_array_value_export("main_sql_attrs", $main_sql_attrs)."
+use_buffered_queries 		= $use_buffered_queries
+ranged_query_value		= $ranged_query_value
+html_strip_tags			= $html_strip_tags
+html_remove_elements		= \"$html_remove_elements\"
+".ini_array_value_export("html_index_attrs", $html_index_attrs)."";
+
 	}
 	
-	if ( !isset($use_buffered_queries) )
-	{
-		$use_buffered_queries = 1;
-		$ranged_query_value = 1;
-	}
-	
-	$settings_string = '<?php
+	$settings_string = "
+$beginning
 
-# web-crawler index
-$seed_urls			= ' . var_export($seed_urls, true) . ';
-$allow_subdomains	= '.$allow_subdomains.';
-$honor_nofollows	= '.$honor_nofollows.';
-$use_localhost		= '.$use_localhost.';
-$custom_address		= "'.$custom_address.'";
-
-# database index
-$use_internal_db	= '.$use_internal_db.';
-$main_sql_query		= "'.$main_sql_query.'";
-$main_sql_attrs		= '.var_export($main_sql_attrs, true).';
-$use_buffered_queries = '.$use_buffered_queries.';
-$ranged_query_value = '.$ranged_query_value.';
-$html_strip_tags	= '.$html_strip_tags.';
-$html_remove_elements	= "'.$html_remove_elements.'";
-$html_index_attrs	= '.var_export($html_index_attrs, true).';
-
-# common indexer settings
-$indexing_interval 	= '.$indexing_interval.';
-$update_interval 	= '.$update_interval.';
-$dialect_replacing	= ' . var_export($dialect_replacing, true) . ';
-$dialect_array		= ' . var_export($dialect_array, true) . ';
-$sentiment_analysis	= '.$sentiment_analysis.';
-$trim_page_title	= '.var_export($trim_page_title, true).';
-$url_keywords		= "'.$url_keywords.'";
-$prefix_mode 		= '.$prefix_mode.';
-$prefix_length		= '.$prefix_length.';
-$dialect_processing	= '.$dialect_processing.';
-$index_pdfs 		= '.$index_pdfs.';
-$xpdf_folder		= "'.$xpdf_folder.'";
-$charset 			= "'.$charset.'";
-$blend_chars 		= ' . var_export($blend_chars, true) . ';
-$ignore_chars 		= ' . var_export($ignore_chars, true) . ';
-$separate_alnum		= '.$separate_alnum.';
+; common indexer settings
+indexing_interval		= $indexing_interval
+update_interval			= $update_interval
+sentiment_analysis		= $sentiment_analysis
+prefix_mode			= $prefix_mode
+prefix_length			= $prefix_length
+dialect_processing		= $dialect_processing
+charset				= \"$charset\"
+" . ini_array_value_export("blend_chars", $blend_chars) . "
+" . ini_array_value_export("ignore_chars", $ignore_chars) . "
+separate_alnum			= $separate_alnum
 					
-# runtime
-$field_weights      = ' . var_export($field_weights, true) . ';
-$sentiweight 		= '.$sentiweight.';
-$keyword_stemming 	= '.$keyword_stemming.';
-$dialect_matching	= '.$dialect_matching.';
-$quality_scoring	= '.$quality_scoring.';
-$forgive_keywords	= '.$forgive_keywords.';
-$expansion_limit 	= '.$expansion_limit.';
-$log_queries	 	= '.$log_queries.';
+; runtime
+" . ini_array_value_export("field_weights", $field_weights, true) . "
+sentiweight			= $sentiweight
+keyword_stemming		= $keyword_stemming
+dialect_matching		= $dialect_matching
+quality_scoring			= $quality_scoring
+forgive_keywords		= $forgive_keywords
+expansion_limit			= $expansion_limit
+log_queries			= $log_queries
 
-# general settings
-$data_columns		= ' . var_export($data_columns, true) . ';
-$number_of_fields	= '.$number_of_fields.';
-$index_type			= '.$index_type.';
-$enable_exec		= '.$enable_exec.';
-$admin_email		= "'.$admin_email.'";
-$mysql_data_dir		= "'.$mysql_data_dir.'";
-$dist_threads		= '.$dist_threads.';
-$innodb_row_format  = '.$innodb_row_format.';
-$document_root		= "'.$_SERVER["DOCUMENT_ROOT"].'";
+; general settings
+admin_email			= \"$admin_email\"
+mysql_data_dir			= \"$mysql_data_dir\"
+dist_threads			= $dist_threads
+innodb_row_format		= $innodb_row_format
+enable_exec			= $enable_exec
+
+; do not edit !
+" . ini_array_value_export("data_columns", $data_columns) . "
+number_of_fields		= $number_of_fields
+index_type			= $index_type
+xpdf_folder			= \"$xpdf_folder\"
+document_root			= \"$document_root\"
 								
-	?>';
+";
 	
 	# write the new settings file
-	$settings_file_path = realpath(dirname(__FILE__)) . "/settings$index_suffix.php";
+	$settings_file_path = realpath(dirname(__FILE__)) . "/settings$index_suffix.txt";
 	
 	if ( file_put_contents($settings_file_path, $settings_string) ) 
 	{
-		echo "<div class='errorbox'>
+		if ( !empty($_SERVER["REMOTE_ADDR"]) )
+		{
+			echo "<div class='errorbox'>
 			<h3 style='color:#00ff00;'>Settings file was created successfully.</h3>
 		  </div>";
-
+		}
+		else
+		{
+			echo "Settings file was created successfully.\n";
+		}
 		$successful_write = true;
 	}
 	else
 	{
-		echo "<div class='errorbox'>
-			<h3 style='color:#ff0000;'>Error: could not write the settings file.</h3>
-		  	<p>Please chmod the file for greater permissions.</p>
-		  </div>";
+		if ( !empty($_SERVER["REMOTE_ADDR"]) )
+		{
+			echo "<div class='errorbox'>
+				<h3 style='color:#ff0000;'>Error: could not write the settings file.</h3>
+				<p>Please chmod the file for greater permissions.</p>
+			  </div>";
+		}
+		else
+		{
+			echo "Error: could not write the settings file.\n";
+			echo "Please chmod the file for greater permissions.\n";
+		}
 		$successful_write = false;
+	}
+	
+	$action = "";
+	if ( isset($settings["action"]) )
+	{
+		$action = $settings["action"];
 	}
 	
 	# post check
 	# if this is a database index, check if column count need to be redefined
-	if ( isset($settings["action"]) && $settings["action"] === "updatesettings" && $index_type == 2 && $successful_write ) 
+	if ( 
+		($action === "updatesettings" || 
+		$action === "check_db_settings") && 
+		$index_type == 2 && 
+		$successful_write &&
+		($previous_main_sql_query != $main_sql_query ||
+		$previous_main_sql_attrs != $main_sql_attrs ||
+		$action === "check_db_settings") ) 
 	{
 		$log = "";
 		$new_field_count = 0;
@@ -1060,10 +1072,18 @@ $document_root		= "'.$_SERVER["DOCUMENT_ROOT"].'";
 		else
 		{
 			$successful_write = false;
-			echo "<div class='errorbox'>
-			<h3 style='color:#ff0000;'>Error: Incorrect SQL parameters </h3>
-		  	<p>".str_replace("\n", "<br>", $log)."</p>
-		  </div>";
+			if ( isset($_SERVER["REMOTE_ADDR"]) )
+			{
+				echo "<div class='errorbox'>
+				<h3 style='color:#ff0000;'>Error: Incorrect SQL parameters </h3>
+				<p>".str_replace("\n", "<br>", $log)."</p>
+			  </div>";
+			}
+			else
+			{
+				echo "Error: Incorrect SQL parameters.\n";
+				echo $log . "\n";
+			}
 		}
 		
 	}
@@ -1072,6 +1092,187 @@ $document_root		= "'.$_SERVER["DOCUMENT_ROOT"].'";
 	
 } # write_settings() ends
 
+function ini_array_value_export($setting_name, $data, $write_keys = false)
+{
+	$index = "";
+	if ( !empty($data) )
+	{
+		foreach ( $data as $key => $item )
+		{
+			if ( $write_keys ) $index = $key;
+			if ( (int)$item === $item )
+			{
+				$arr[] = sprintf("%-32s", $setting_name."[$index]") . "= $item";
+			}
+			else
+			{
+				$arr[] = sprintf("%-32s", $setting_name."[$index]") . "= \"$item\"";
+			}
+		}
+		
+		$output = implode("\r\n", $arr);
+	}
+	else
+	{
+		# no defined values
+		$output = sprintf("%-32s", $setting_name."[]") . "= ";
+	}
+	return $output;
+}
+
+function create_tables($index_id, $index_type, &$created_tables = array(), &$data_directory_warning = array(), &$general_database_errors = array(), $data_dir_sql = "", $row_compression = "")
+{
+	$errors = 0;
+	$index_suffix = "_" . $index_id;
+	
+	# web crawler
+	if ( $index_type == 1 ) 
+	{
+		$create_table["PMBDocinfo$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBDocinfo$index_suffix (
+		 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
+		 URL varbinary(500) NOT NULL,
+		 url_checksum binary(16) NOT NULL,
+		 token_count varchar(60) NOT NULL,
+		 avgsentiscore tinyint(4) DEFAULT '0',
+		 attr_category tinyint(3) unsigned DEFAULT NULL,
+		 field0 varbinary(255) NOT NULL,
+		 field1 varbinary(10000) NOT NULL,
+		 field2 varbinary(255) NOT NULL,
+		 field3 varbinary(255) NOT NULL,
+		 attr_timestamp int(10) unsigned NOT NULL,
+		 checksum binary(16) NOT NULL,
+		 attr_domain int(10) unsigned NOT NULL,
+		 PRIMARY KEY (ID),
+		 KEY attr_category (attr_category),
+		 KEY url_checksum (url_checksum)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
+	}
+	# other kind of index
+	else
+	{
+		$create_table["PMBDocinfo$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBDocinfo$index_suffix (
+		 ID int(11) unsigned NOT NULL,
+		 avgsentiscore tinyint(4) NOT NULL,
+		 PRIMARY KEY (ID),
+		 KEY avgsentiscore (avgsentiscore)	
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
+	}
+	
+	$create_table["PMBTokens$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBTokens$index_suffix (
+	 checksum int(10) unsigned NOT NULL,
+	 token varbinary(40) NOT NULL,
+	 doc_matches int(8) unsigned NOT NULL,
+	 ID mediumint(10) unsigned NOT NULL,
+	 doc_ids mediumblob NOT NULL,
+	 PRIMARY KEY (checksum, token, doc_matches, ID)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
+	
+	$create_table["PMBCategories$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBCategories$index_suffix (
+	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
+	 keyword varchar(255) NOT NULL,
+	 name varchar(255) NOT NULL,
+	 count mediumint(8) unsigned NOT NULL DEFAULT 0,
+	 type tinyint(3) unsigned NOT NULL DEFAULT 0,
+	 PRIMARY KEY (ID),
+	 KEY keyword (keyword)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
+	
+	$create_table["PMBPrefixes$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBPrefixes$index_suffix (
+	 checksum int(10) unsigned NOT NULL,
+	 tok_data mediumblob NOT NULL,
+	 PRIMARY KEY (checksum)
+	 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
+	
+	$create_table["PMBQueryLog$index_suffix"] = "CREATE TABLE PMBQueryLog$index_suffix (
+	 ID int(10) unsigned NOT NULL AUTO_INCREMENT,
+	 timestamp int(10) unsigned NOT NULL,
+	 ip int(10) unsigned NOT NULL,
+	 query varbinary(255) NOT NULL,
+	 results mediumint(8) unsigned NOT NULL,
+	 searchmode tinyint(3) unsigned NOT NULL,
+	 querytime mediumint(8) unsigned NOT NULL,
+	 PRIMARY KEY (ID),
+	 KEY query (query),
+	 KEY ip (ip),
+	 KEY results (results),
+	 KEY querytime (querytime)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8 $data_dir_sql";
+
+	# 7. If there are no errors, check whether the database tables exist
+	# if not, create the tables
+	try
+	{
+		$connection = db_connection();
+		$created_tables 			= array();
+		$data_directory_warning 	= false;
+		$general_database_errors 	= array();
+		$latest_sql = "";
+		$connection->beginTransaction();
+		
+		foreach ( $create_table as $table_name => $table_sql ) 
+		{
+			try
+			{
+				# table doesn't exist, create it ! 
+				if ( !$connection->query("SHOW TABLES LIKE '$table_name'")->rowCount() )
+				{
+					$connection->query($table_sql);
+					
+					# store tables that have been created 
+					$created_tables[$table_name] = 1;
+				}
+			}
+			catch( PDOException $e )
+			{
+				echo $e->getMessage() . "\n";
+				if ( !empty($data_dir_sql) )
+				{
+					# maybe the failure is because because a custom data directory is set ! 
+					# try againt without it
+					try
+					{
+						$connection->query(str_ireplace($data_dir_sql, "", $table_sql));
+						
+						# it went through, so the data directory is the problem ! 
+						$data_directory_warning = $e->getMessage();
+						
+						# store tables that have been created 
+						$created_tables[$table_name] = 1;
+					}
+					catch ( PDOException $e ) 
+					{
+						# general database error
+						$general_database_errors[] = $e->getMessage();
+						++$errors;
+					}
+				}
+				else
+				{
+					# general database error
+					$general_database_errors[] = $e->getMessage();
+					++$errors;
+				}
+			}
+			
+		}
+		
+		$connection->commit();
+	}
+	catch ( PDOException $e ) 
+	{
+		echo $e->getMessage() . "\n";
+		
+		$connection->rollBack();
+		$general_database_errors[] = $e->getMessage();
+	}
+	
+	if ( $errors === 0 ) 
+	{
+		return true;
+	}
+	
+	return false;
+}
 
 function removedomain($url)
 {
@@ -1317,9 +1518,6 @@ function rebuild_prefixes($prefix_mode, $prefix_length, $dialect_replacing, $ind
 		$countpdo = $connection->query("SELECT COUNT(ID) FROM PMBTokens$index_suffix");
 		$total_tok_count = $countpdo->fetchColumn();
 		
-		#$connection->query("INSERT INTO PMBStats$index_suffix (ID, value) VALUES (2, 1), (3, 2), (5, 0), (7, $total_tok_count) ON DUPLICATE KEY UPDATE value = VALUES(value)");
-		
-		# ID 	name 	type 	comment 	documents 	updated 	indexing_permission 	current_state 	temp_loads 	temp_loads_left
 		$connection->query("UPDATE PMBIndexes SET 
 							indexing_permission = 1,
 							current_state = 2,
@@ -1456,7 +1654,7 @@ function shutdown($index_id, $process_number = 0)
 	if ( $error['type'] === E_ERROR ) 
 	{
 		# include settings file ( again ) 
-		include "settings_".$index_id.".php";
+		include "autoload_settings.php";
 		
 		if ( !empty($admin_email) )
 		{
@@ -1470,7 +1668,6 @@ function shutdown($index_id, $process_number = 0)
 		
 		# Set indexing state ( again ) 
 		SetIndexingState(0, $index_id);
-		SetIndexingPermission(0, $index_id);
 		SetProcessState($index_id, $process_number, 0);
     }
 	
@@ -1495,15 +1692,15 @@ function SetIndexingState($state, $index_id)
 	
 	try
 	{
-		$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, updated = UNIX_TIMESTAMP() WHERE ID = ?");
-		$perm->execute(array($state, $index_id));
+		$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, indexing_permission = ?, updated = UNIX_TIMESTAMP() WHERE ID = ?");
+		$perm->execute(array($state, $state, $index_id));
 	}
 	catch ( PDOException $e ) 
 	{
 		try
 		{
-			$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, updated = UNIX_TIMESTAMP() WHERE ID = ?");
-			$perm->execute(array($state, $index_id));
+			$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, indexing_permission = ?, updated = UNIX_TIMESTAMP() WHERE ID = ?");
+			$perm->execute(array($state, $state, $index_id));
 		}
 		catch ( PDOException $e ) 
 		{
@@ -1512,62 +1709,6 @@ function SetIndexingState($state, $index_id)
 	}
 	
 	return 1;
-}
-
-function SetIndexingPermission($permission, $index_id)
-{
-	if ( !is_numeric($permission) || $permission > 1 || $permission < 0 )
-	{
-		return 0;
-	}
-	
-	$connection = db_connection();
-	
-	try
-	{
-		#$perm = $connection->prepare("INSERT INTO PMBStats (ID, value) VALUES (2, :state) ON DUPLICATE KEY UPDATE value = VALUES(value)");
-		$perm = $connection->prepare("UPDATE PMBIndexes SET indexing_permission = ? WHERE ID = ?");
-		$perm->execute(array($permission, $index_id));
-	}
-	catch ( PDOException $e ) 
-	{
-		try
-		{
-			$perm = $connection->prepare("UPDATE PMBIndexes SET indexing_permission = ? WHERE ID = ?");
-			$perm->execute(array($permission, $index_id));
-		}
-		catch ( PDOException $e ) 
-		{
-			return 0;
-		}
-	}
-	
-	return 1;
-}
-
-function GetIndexingPermission()
-{
-	$connection = db_connection();
-	
-	try
-	{
-		$perm = $connection->query("SELECT value FROM PMBStats WHERE ID = 2");
-		$permission = $perm->fetchColumn();
-	}
-	catch ( PDOException $e ) 
-	{
-		try
-		{
-			$perm = $connection->query("SELECT value FROM PMBStats WHERE ID = 2");
-			$permission = $perm->fetchColumn();
-		}
-		catch ( PDOException $e ) 
-		{
-			return 0;
-		}
-	}
-	
-	return $permission;
 }
 
 function delete_doc_data($identifier, $index_id, $remove_docinfo = false)

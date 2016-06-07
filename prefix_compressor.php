@@ -19,7 +19,6 @@ if ( !isset($process_number) )
 	require_once("input_value_processor.php");
 	require_once("tokenizer_functions.php");
 	require_once("db_connection.php");
-	require_once("settings$index_suffix.php");
 }
 
 # launch sister processes here if multiprocessing is turned on! 
@@ -171,7 +170,7 @@ try
 			$delta = 1;
 			$bin_data = "";
 			
-			foreach ( $combinations as $integer )
+			foreach ( $combinations as $c_i => $integer )
 			{
 				$tmp = $integer-$delta+1;
 				
@@ -263,6 +262,8 @@ try
 			$statistic_total_time += microtime(true)-$statistic_start;
 		}
 	}
+	
+	echo "$rowcounter rows fetched \n";
 				
 	# after, try if there is still some data left
 	if ( !empty($escape) )

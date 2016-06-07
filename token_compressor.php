@@ -19,7 +19,6 @@ if ( !isset($process_number) )
 	require_once("input_value_processor.php");
 	require_once("tokenizer_functions.php");
 	require_once("db_connection.php");
-	require_once("settings$index_suffix.php");
 }
 
 # launch sister processes here if multiprocessing is turned on! 

@@ -29,32 +29,6 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 }
 
-$innodb_row_format_sql = "";
-if ( isset($innodb_row_format) )
-{
-	switch ( $innodb_row_format ) 
-	{
-		case 0;
-		$innodb_row_format_sql = "ROW_FORMAT=COMPACT";
-		break;
-		case 1;
-		$innodb_row_format_sql = "ROW_FORMAT=REDUNDANT";
-		break;
-		case 2;
-		$innodb_row_format_sql = "ROW_FORMAT=DYNAMIC";
-		break;
-		case 3;
-		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16";
-		break;
-		case 4;
-		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8";
-		break;
-		case 5;
-		$innodb_row_format_sql = "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4";
-		break;
-	}
-}
-
 register_shutdown_function("shutdown", $index_id);
 
 $suffix_list = array();
@@ -184,19 +158,18 @@ try
 		die("Unknown index id $index_id");
 	}
 	
+	# update current indexing state to true ( 1 ) 
+	SetIndexingState(1, $index_id);
+	
+	$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP() WHERE ID = ?");
+	$upd_state->execute(array($index_id));
+	
 	# preload dictionary ( if exists already ) 
 	$dictpdo = $connection->query("SELECT token, ID FROM PMBTokens$index_suffix;");
 	while ( $row = $dictpdo->fetch(PDO::FETCH_ASSOC) )
 	{
 		$pre_existing_tokens[$row["token"]] = (int)$row["ID"];
 	}
-	
-	$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP() WHERE ID = ?");
-	$upd_state->execute(array($index_id));
-
-	# update current indexing state to true ( 1 ) 
-	SetIndexingPermission(1, $index_id);
-	SetIndexingState(1, $index_id);
 	
 	$data_dir_sql = "";
 	if ( !empty($mysql_data_dir) )
@@ -968,10 +941,6 @@ while ( !empty($url_list[$lp]) )
 		# if there are proper links, investigate
 		if ( !empty($temp_links) )
 		{
-			# check if this is a previously known page right here ! 
-			# if new page, add into middle of the array
-			# if previously known page, but eligible for update, add into the end of the array
-			# if previously known page but not eligible for update, ignore !
 			try
 			{	
 				$linkpdo = $connection->prepare("SELECT ID, 
@@ -1060,10 +1029,7 @@ while ( !empty($url_list[$lp]) )
 	# trim page title?
 	if ( !empty($trim_page_title) )
 	{
-		foreach ( $trim_page_title as $trim_value )
-		{
-			$fields[0] = str_ireplace($trim_value, " ", $fields[0]);
-		}
+		$fields[0] = str_ireplace($trim_page_title, " ", $fields[0]);
 	}
 
 	# get the md5 checksum for this page
@@ -1559,7 +1525,6 @@ if ( $test_mode )
 {
 	echo $log;
 	SetIndexingState(0, $index_id);
-	SetIndexingPermission(0, $index_id);
 	return;
 }
 
@@ -1683,7 +1648,6 @@ if ( $test_mode )
 
 # update current indexing state to false ( 0 ) 
 SetIndexingState(0, $index_id);
-#SetIndexingPermission(0);
 
 
 
