@@ -102,7 +102,7 @@ the process.
 How to run the indexer
 ----------------------
 
-You have two options:
+You have three options:
 
 1. In the web-based control panel ( control.php ), press 'Run indexer'.
 
@@ -114,6 +114,23 @@ extra parameters:
 	usermode ( ignores indexing intervals )
 	OR 
 	testmode ( checks index configuration for errors )
+
+OR
+
+3. Run indexer automatically by setting an appropiate indexing interval.
+When PMBApi is used, an indexing process will be launched if enough
+time has passed since the last indexing.
+
+Tip:
+Pickmybrain supports gradually growing indexes. This means you can add 
+new documents into your search index simply by running the indexer again.
+In cases like these Pickmybrain will merge the old already compressed
+data with the new data. 
+
+Unfortunately Pickmybrain does not support modifying of already indexed data.
+At some point I will probably implement a kill-list feature which maintains 
+a list of non-wanted document ids and reduces them from search results if 
+necessary.
 
 
 How to search

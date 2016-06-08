@@ -1,0 +1,122 @@
+Instructions for Pickmybrain configuration files
+------------------------------------------------
+
+; settings_X.txt
+; where X is the index id
+
+; semicolon marks a comment
+; do not define more than one variable per row
+
+; this variable has a single value
+variable = 1
+; if same variable is declared again later
+; the existing value will be overwritten
+variable = 2 
+
+; the following syntax defines an array
+array[] = 1
+
+; new items can be added into the array with same the syntax
+array[] = 2
+
+; always use double quotation marks for strings
+string = "myvalue"
+
+; settings explained
+
+; web-crawler indexes
+seed_urls[]            	; the urls that the web-crawlers loads every time indexer is launched
+			; must start with http ( or https )
+			; indexer will only index domains defined in this list
+			; subdomain can be defined as a wildcard ( *.mydomain.com )
+allow_subdomains	; 0=disabled, 1=enabled - general setting for subdomains - won't override wildcards
+honor_nofollows		; 0=disabled, 1=enabled - whether to honor nofollow-attributes on links
+use_localhost		; 0=disabled, 1=enabled - enable this if the web-server and the db-server are on the 
+			; same machine
+custom_address		; ""=disabled, "192.168.x.x"=enabled - replaces the localhost address with local area 
+			; ip address
+url_keywords		; ""=disabled, "findthis -notthis"=enabled  - indexes only web pages that have these
+			; keywords in their URL
+index_pdfs		; 0=disabled, 1=enabled - whether to index pdf-documents or not
+trim_page_title[]       ; ""=disabled, "value"_enabled
+trim_page_title[]       ; these values will be removed from the page titles
+
+; database-specific indexes
+use_internal_db		; 1=enabled, 0=disabled (external db defined in ext_db_connection_INDEXID.php )
+main_sql_query		; the sql query that fetches the data, can be extended onto multiple rows 
+main_sql_attrs[]        ; (optional) sql columns that can be used for filtering/sorting/grouping results
+main_sql_attrs[]        ; full-text indexing is disabled for these columns
+main_sql_attrs[]        ; value must be an unsigned integer! 
+use_buffered_queries 	; 0=disabled, 1=enabled - If enabled, resultset is copied from db server to PHP ( memory )
+ranged_query_value	; 0=disabled, >0 enabled - defines if connection should be renewed after 
+			; x documents have been fetched. Practically essential if buffered queries are enabled
+html_strip_tags		; 0=disabled, 1=enabled removes xml tags from the data
+html_remove_elements	; ""=disabled, "element1, element2"=enabled removed the tags plus data inside them 	
+html_index_attrs[]      ; choose whether to index attributes of certain xml tags      
+html_index_attrs[]      ; example value:  "img=alt,title,src"  ( one element, multiple attributes per row )
+
+; common indexer settings
+indexing_interval	; 0=disabled, >0 minutes from the latest run - launches indexer automatically if enabled
+			; indexer is launched automatically only if index is searched through PMBApi
+update_interval		; not currently in use
+sentiment_analysis	; 0=disabled, 1=english, 2=finnish, 1001=external attribute
+			; the external attribute is either pmb_language column in the sql query ( same values apply )
+			; or the lang-attribute of the html-tag
+			; NOTICE: this requires the optional sentiment analysis plugin
+prefix_mode		; 0=disabled, 1=prefixes, 2=prefixes+postfixes, 3=infixes
+prefix_length		; minimum prefix length
+dialect_processing	; 0=disabled, 1=enabled replaces non-english characters with english characters that bear most 
+			; resemblance to them 
+charset			; which characters are indexed
+			; example: "0-9a-zצהו#$" defines letters a to z, numbers 0 to 9
+			; and additional characters of צ, ה, ו, # and $
+blend_chars[]           ; blend chars copy and split tokens that include blend chars
+blend_chars[]		; example blend char "."
+blend_chars[]		; example token: "mind.in.a.box" - this token will now be found with keywords mind in a box
+			; regardless whether prefixing is enabled
+			; example token 2: "u.s.a" - this token will now be found with keyword usa
+ignore_chars[]          ; if defined, these characters will be removed completely
+			; example ignore char "'"
+			; example token: "Joe's" => "Joes"
+separate_alnum		; separates numbers and letters from each other with a space
+			; may improve search results
+					
+; runtime
+field_weights[title]    ; each column should had its own field weight ( integer between 1 and 100 )
+field_weights[content]  ; default value is 1
+field_weights[url]      ; if field weight is >1, matches in this field will have more weight
+field_weights[meta]     ; than the ones with lower field weight
+sentiweight		; enable field weighting in sentiment search mode
+keyword_stemming	; 0=disabled, 1=enabled stem keywords which are provided for the PMBApi during searching
+dialect_matching	; 0=disabled, 1=enabled removes non-english letters from provided keywords
+			; either the modified version or the original version of the keyword is required to match
+quality_scoring		; 0=disabled, 1=enabled if enabled, prefix matches will have lower score than keywords
+			; that are exact matches
+			; score = matching_characters/total characters
+forgive_keywords	; not currently in use
+expansion_limit		; 0=disabled, >0 enabled - how many best prefix matches will be used per provided keyword
+			; has effect only if prefixes are enabled
+log_queries		; 0=disabled, 1=enabled stores information about searches made through PMBApi
+
+; general settings
+admin_email		; sends email to this address if a fatal error occurs
+mysql_data_dir		; custom mysql data directory - for example a faster SSD disk			
+dist_threads		; multiprocessing 1=disabled, >1=number of simultaneous processes 
+innodb_row_format	; 0=compact
+			: 1=redundant
+			: 2=dynamic
+			; 3=compressed (16K keyblock)
+			; 4=compressed (8K keyblock)
+			; 5=compressed (4K keyblock)
+enable_exec		; script execution method 1=exec(), 0=asynchronous curl request
+			; notice: PDF-indexing works only if this is set to 1
+
+
+; do not edit !
+data_columns[]          ; these should not be defined manually
+data_columns[]          ; these define the full-text data columns on both index types
+number_of_fields	; number of full-text data columns
+index_type		; 1=web-crawler, 2=database index 
+xpdf_folder		; path to xpdf pdf-reader
+document_root		; the document root ( unnecessary for command-line based operation )
+								
