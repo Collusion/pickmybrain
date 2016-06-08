@@ -91,7 +91,8 @@ OR
 
 2. Run the file clisetup.php from the command line. First create a
 new index and then manually edit the automatically created 
-configuration file ( settings_INDEXID.txt ). 
+configuration file ( settings_INDEXID.txt ). See MANPAGES.txt for
+detailed instructions.
 
 For database indexes: 
 After you have finished configuring the settings, please open the 
