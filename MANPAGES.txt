@@ -51,7 +51,7 @@ use_buffered_queries 	; 0=disabled, 1=enabled - If enabled, resultset is copied 
 ranged_query_value	; 0=disabled, >0 enabled - defines if connection should be renewed after 
 			; x documents have been fetched. Practically essential if buffered queries are enabled
 html_strip_tags		; 0=disabled, 1=enabled removes xml tags from the data
-html_remove_elements	; ""=disabled, "element1, element2"=enabled removed the tags plus data inside them 	
+html_remove_elements	; ""=disabled, "element1, element2"=enabled removes the tags plus the data inside them 	
 html_index_attrs[]      ; choose whether to index attributes of certain xml tags      
 html_index_attrs[]      ; example value:  "img=alt,title,src"  ( one element, multiple attributes per row )
 
