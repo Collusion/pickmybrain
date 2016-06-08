@@ -25,7 +25,7 @@ string = "myvalue"
 ; settings explained
 
 ; web-crawler indexes
-seed_urls[]            	; the urls that the web-crawlers loads every time indexer is launched
+seed_urls[]            	; the urls that the web-crawler loads every time indexer is launched
 			; must start with http ( or https )
 			; indexer will only index domains defined in this list
 			; subdomain can be defined as a wildcard ( *.mydomain.com )
@@ -38,7 +38,7 @@ custom_address		; ""=disabled, "192.168.x.x"=enabled - replaces the localhost ad
 url_keywords		; ""=disabled, "findthis -notthis"=enabled  - indexes only web pages that have these
 			; keywords in their URL
 index_pdfs		; 0=disabled, 1=enabled - whether to index pdf-documents or not
-trim_page_title[]       ; ""=disabled, "value"_enabled
+trim_page_title[]       ; ""=disabled, "value"=enabled
 trim_page_title[]       ; these values will be removed from the page titles
 
 ; database-specific indexes
