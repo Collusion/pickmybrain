@@ -15,7 +15,8 @@ Overview
 
 Pickmybrain is an open source search engine implemented with PHP
 programming language and MySQL as data storage solution. 
-Pickmybrain enables users to index databases and websites. 
+Pickmybrain enables users to index databases, websites and
+PDF files. 
 
 
 License
