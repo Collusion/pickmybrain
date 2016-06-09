@@ -114,7 +114,10 @@ if ( !empty($html_remove_elements) )
 	
 	foreach ( $expl as $i => $value )
 	{
-		$elements_to_remove[] = trim($value);
+		if ( !empty($value) )
+		{
+			$elements_to_remove[] = trim($value);
+		}
 	}
 }
 
