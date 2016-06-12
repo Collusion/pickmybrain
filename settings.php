@@ -16,7 +16,7 @@
 
 # indexer
 $seed_urls			= array ();
-$indexing_interval 	= 60;
+$indexing_interval 	= 0;
 $update_interval 	= 1440;
 $allow_subdomains	= 0;
 $honor_nofollows	= 1;
