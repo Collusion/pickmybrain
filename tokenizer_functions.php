@@ -1781,7 +1781,8 @@ function delete_doc_data($identifier, $index_id, $remove_docinfo = false)
 function SetProcessState($index_id, $process_number, $process_state)
 {
 	$connection = db_connection();
-	$filepath = "pmb_".$index_id."_".$process_number.".pid";
+	$directory = realpath(dirname(__FILE__));
+	$filepath = $directory . "/pmb_".$index_id."_".$process_number.".pid";
 	
 	try
 	{

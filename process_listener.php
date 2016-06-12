@@ -15,10 +15,11 @@ if ( $dist_threads > 1 )
 	if ( $process_number === 0 ) 
 	{
 		# create a list of process pid files
+		$directory = realpath(dirname(__FILE__));
 		$pidlist = array();
 		for ( $i = 1 ; $i < $dist_threads ; ++$i ) 
 		{
-			$pidlist["pmb_".$index_id."_".$i.".pid"] = $i;
+			$pidlist[$directory . "/pmb_".$index_id."_".$i.".pid"] = $i;
 		}
 		
 		$interval = microtime(true) - $timer;
