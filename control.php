@@ -1125,7 +1125,7 @@ try
 			<div style='width:100%;display:inline-block;position:relative;clear:both:float:left;'>
 				<input type='button' style='display:inline-block;position:absolute;right:0;top:0;' value='Search' onClick='TogglePMBSearch();' />
 				<div style='display:inline-block;position:absolute;right:15px;top:60px;color:#222;'>CTRL+Q</div>
-				<h3>Index name: <span class='green'>$index_name</span></h3>
+				<h3>Index name: <span class='green'>$index_name</span> id: <span class='grey'>$index_id</span></h3>
 				<h3>Index type: <span class='grey'>$index_type_desc</span></h3>
 				<h3>Total indexed documents: $doc_count</h3>
 				<h3>Indexer state: $state</h3>
@@ -1373,7 +1373,8 @@ switch ( $innodb_row_format )
     <h3>Seed urls</h3>
     <p>
     	The search engine starts indexing web pages from one or multiple pre-defined addresses by collecting and examining every link that these pages point to. 
-    	One URL address is required, but it may be necessary to add other urls too if not every section of the website is interlinked.
+    	One URL address is required, but it may be necessary to add other urls too if not every section of the website is interlinked. Please define one address per row. 
+        Addresses must contain the protocol ( like http:// or https:// ).
     </p>
     <p>
     	Notice: subdomain can be given as a wildcard ( like http://*.mydomain.com ). This will allow all subdomains for this particular domain, even if subdomains are disabled otherwise. 

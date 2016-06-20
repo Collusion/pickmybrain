@@ -69,6 +69,7 @@ try
 	}
 	
 	$unbuffered_connection = db_connection(false);
+	$old_unbuffered_connection = db_connection(false);
 	
 	$max_id = pow(2, 32);
 	$scale = (int)($max_id / $dist_threads);
@@ -93,7 +94,6 @@ try
 		
 	$combinations 			= array();
 	$temp_sql 				= "";
-	$escape					= array();
 	$s = 0;
 	$x = 1;
 	
@@ -102,6 +102,7 @@ try
 	{
 		$bin_val = pack("H*", sprintf("%02x", $i));
 		$hex_lookup_encode[$i] = $bin_val;
+		$hex_lookup_decode[$bin_val] = $i;
 	}
 	
 	$tokens_start = microtime(true);
@@ -148,8 +149,10 @@ try
 								(token_checksum << 6 | cutlen) as combined
 								FROM PMBpretemp$index_suffix
 								$where_sql
-								ORDER BY checksum");								
-											
+								ORDER BY checksum");							
+						
+	$last_row = false;
+	$counter = 0;										
 	$rowcounter = 0;
 	
 	if ( $process_number === 0 ) 
@@ -157,48 +160,104 @@ try
 		$connection->beginTransaction();
 	}
 	
-	while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) )
+	$oldpdo = $old_unbuffered_connection->query("SELECT * FROM PMBPrefixes$index_suffix $where_sql ORDER BY checksum");
+	
+	# prefetch first old row
+	$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
+	
+	while ( !$last_row )
 	{
+		$row = $pdo->fetch(PDO::FETCH_ASSOC);
 		++$rowcounter;
+		++$counter;
 		
-		$checksum 		= (int)$row["checksum"];
-		$combined		= (int)$row["combined"];
+		if ( $row )
+		{
+			$checksum 		= +$row["checksum"];
+			$combined		= +$row["combined"];
+		}
+		else
+		{
+			echo "LAST ROW - counter: $counter process_number: $process_number \n";
+			$last_row = true;
+			
+			if ( $counter === 1 ) 
+			{
+				break;
+			}
+		}
 		
 		# different checksum ! 
-		if ( $min_checksum > $start_checksum && $checksum !== $min_checksum ) 
+		if ( ($min_checksum > $start_checksum && $checksum !== $min_checksum) || $last_row ) 
 		{
-			# sort combinations
-			sort($combinations);
-
-			$delta = 1;
-			$bin_data = "";
-			
-			foreach ( $combinations as $c_i => $integer )
+			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) ) 
 			{
-				$tmp = $integer-$delta+1;
+				$temp_sql .= ",(".$oldrow["checksum"].", ".$connection->quote($oldrow["tok_data"]).")";
+				++$s;
 				
-				do
+				if ( $s >= $write_buffer_len ) 
 				{
-					$lowest7bits = $tmp & 127;
-					$tmp >>= 7;
+					$insert_start = microtime(true);
+					# write to disk 
+					$temp_sql[0] = " ";
+					$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES " . $temp_sql);
+					$insert_time += (microtime(true)-$insert_start);
+					++$insert_counter;
 					
-					if ( $tmp ) 
+					unset($temp_sql);				
+					$temp_sql 		= "";
+					$s				= 0;
+					
+					if ( $process_number === 0 && $insert_counter >= $flush_interval )
 					{
-						$bin_data .= $hex_lookup_encode[$lowest7bits];
-					}
-					else
-					{
-						$bin_data .= $hex_lookup_encode[(128 | $lowest7bits)];
+						$connection->commit();
+						$connection->beginTransaction();
+						$insert_counter = 0;
 					}
 				}
-				while ( $tmp ) ;
-		
-				$delta = $integer;
+				
+				# fetch new row
+				$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
 			}
-
-			$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
-			++$s;
-
+			
+			# if these rows are to be combined
+			if ( $oldrow && $min_checksum == $oldrow["checksum"]  )
+			{
+				# step 1: decode the old data
+				$old_combinations = VBDeltaDecode($oldrow["tok_data"], $hex_lookup_decode);
+				
+				# step 2: merge the data
+				foreach ( $old_combinations as $old_comb ) 
+				{
+					$combinations[] = $old_comb;
+				}
+				
+				# step 3: remove duplicate values
+				$combinations = array_flip(array_flip($combinations));
+				
+				# step 4: sort combinations
+				sort($combinations);
+				
+				# step 5: recompress
+				$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
+				
+				$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
+				++$s;
+				
+				# fetch new oldrow
+				$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
+			}
+			else
+			{
+				# just insert the current row, because min_checksum < $oldrow["checksum"]
+				# in other terms: this is a completely new prefix
+				sort($combinations);
+				$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
+				
+				$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
+				++$s;
+			}
+			
 			if ( $s >= $write_buffer_len ) 
 			{
 				$insert_start = microtime(true);
@@ -263,26 +322,43 @@ try
 	}
 	
 	echo "$rowcounter rows fetched \n";
+
+	# rest of the old data ( if availabe ) 
+	while ( $oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC) )
+	{
+		$temp_sql .= ",(".$oldrow["checksum"].", ".$connection->quote($oldrow["tok_data"]).")";
+		++$s;
 				
-	# after, try if there is still some data left
+		if ( $s >= $write_buffer_len ) 
+		{
+			$insert_start = microtime(true);
+			# write to disk 
+			$temp_sql[0] = " ";
+			$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES " . $temp_sql);
+			$insert_time += (microtime(true)-$insert_start);
+			++$insert_counter;
+					
+			unset($temp_sql);				
+			$temp_sql 		= "";
+			$s				= 0;
+					
+			if ( $process_number === 0 && $insert_counter >= $flush_interval )
+			{
+				$connection->commit();
+				$connection->beginTransaction();
+				$insert_counter = 0;
+			}
+		}
+	}
+	
 	if ( !empty($temp_sql) )
 	{
-		# compress remaining data
-		if ( !empty($combinations) )
-		{
-			sort($combinations);
-				
-			$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
-								
-			$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
-			++$s;
-		}
-		
-		# write to disk 
-		$temp_sql[0] = " ";
+		# write rest of the data
 		$insert_start = microtime(true);
+		$temp_sql[0] = " ";
 		$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES " . $temp_sql);
 		$insert_time += (microtime(true)-$insert_start);
+		++$insert_counter;
 	}
 	
 	if ( $process_number === 0 )
@@ -293,7 +369,7 @@ try
 }
 catch ( PDOException $e ) 
 {
-	echo "error during PMBPrefixes: ";
+	echo "error during PMBPrefixes ($process_number): ";
 	echo $e->getMessage();
 }
 
@@ -321,7 +397,6 @@ try
 			{
 				$ins_sql[0] = " ";
 				$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
-				#$inspdo->execute($escape);
 				$ins_sql = "";
 				$w = 0;
 				++$insert_counter;
@@ -345,7 +420,6 @@ try
 		{
 			$ins_sql[0] = " ";
 			$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
-			#$inspdo->execute($escape);
 			$ins_sql = "";
 			$insert_counter = 0;
 		}
@@ -366,7 +440,7 @@ try
 		
 		$connection->commit();
 		$drop_end = microtime(true) - $drop_start;
-	}	
+	}
 }
 catch ( PDOException $e ) 
 {

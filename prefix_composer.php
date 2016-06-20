@@ -56,10 +56,10 @@ try
 	}
 	
 	# find out which tokens are already prefixes
-	$countpdo = $connection->query("SELECT MAX(ID) FROM PMBTokens$index_suffix");
+	$countpdo = $connection->query("SELECT COUNT(checksum) FROM PMBTokens$index_suffix");
 	$min_dictionary_id = $countpdo->fetchColumn();
 	
-	$temppdo = $connection->query("SELECT MAX(ID) FROM PMBtoktemp$index_suffix");
+	$temppdo = $connection->query("SELECT COUNT(token) FROM PMBtoktemp$index_suffix");
 	$max_temp_id = $temppdo->fetchColumn();
 	
 	if ( !$min_dictionary_id ) 
@@ -89,25 +89,21 @@ try
 	{
 		echo "Starting prefix creation at token offset $min_dictionary_id (max token id: $max_temp_id)\n";
 	}
-	
-	$countpdo = $connection->query("SELECT COUNT(ID) FROM PMBtoktemp$index_suffix");
-	$tokcount = $countpdo->fetchColumn();
 
 	$total_insert_time = 0;
-	$scale = (int)($tokcount / $dist_threads);
+	$scale = (int)($max_temp_id / $dist_threads); # count of tokens per process
 	$start_id = $process_number * $scale + $min_dictionary_id;
 	$min_id = $start_id;
 	$max_id = $min_id + $scale;
 	
-	$where_sql = "WHERE ID >= $min_id AND ID < $max_id";
+	$where_sql = "LIMIT $start_id, $scale";
 
 	if ( $process_number == $dist_threads-1 ) 
 	{
 		# last thread ( with biggest offset ) 
-		$max_id = pow(2, 32); # just to be sure 
-		$where_sql = "WHERE ID >= $min_id AND ID <= $max_id";
+		$where_sql = "LIMIT $start_id, 9999999999";
 	}
-	
+
 	if ( $dist_threads > 1 ) 
 	{
 		$and_condition = " AND ";
@@ -119,12 +115,7 @@ try
 	}
 
 	$maximum_prefix_len 	= 20;
-
-	$pretemp_limit 			= 20000;
-	$sql_query_count		= 0;
-	$sql_query_limit		= ceil($scale / $pretemp_limit);
 	$insert_prefix_sql 		= "";
-	$prefix_escape 			= array();
 	
 	$bytes_of_data 			= 0;
 	$total_bytes_of_data 	= 0;
@@ -152,6 +143,7 @@ try
 	{	
 		++$token_total_count;
 		$token = $row["token"];
+		$token_crc32 = crc32($token);
 	
 		# dialect processing: remove dialect ( ä, ö, å + etc) from tokens and add as prefix
 		if ( !empty($dialect_find) )
@@ -159,12 +151,8 @@ try
 			$nodialect = str_replace($dialect_find, $dialect_replace, $token);
 			if ( $nodialect !== $token ) 
 			{
-				if ( $pr > 0 ) $insert_prefix_sql .= ",";
-					
-				$insert_prefix_sql 		.= "(?,?,?)";
-				$prefix_escape[] 		= crc32($nodialect);		 		# prefix crc32 value
-				$prefix_escape[]		= crc32($token);   				 	# original token crc32 checksum
-				$prefix_escape[] 		= 0;			 			  	 	# how many characters have been cut of from the original word 
+				# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
+				$insert_prefix_sql 		.= ",(".crc32($nodialect).",$token_crc32,0)";	
 				++$pr;
 			}
 		}
@@ -174,7 +162,11 @@ try
 		{
 			$min_prefix_len = $prefix_length;
 			$wordlen = mb_strlen($token);
-
+			if ( $wordlen > $maximum_prefix_len ) 
+			{
+				$wordlen = $maximum_prefix_len;
+			}
+			
 			if ( $wordlen > $min_prefix_len ) 
 			{
 				if ( $prefix_mode === 3 ) 
@@ -185,13 +177,8 @@ try
 						for ( $j = 0 ; ($i + $j) <= $wordlen ; ++$j )
 						{
 							$prefix_word = mb_substr($token, $j, $i);
-
-							if ( $pr > 0 ) $insert_prefix_sql .= ",";
-					
-							$insert_prefix_sql 		.= "(?,?,?)";
-							$prefix_escape[] 		= crc32($prefix_word);		 		# prefix crc32 value
-							$prefix_escape[]		= crc32($token);   				 	# original token crc32 checksum
-							$prefix_escape[] 		= $wordlen-$i;			 			# how many characters have been cut of from the original word 
+							# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
+							$insert_prefix_sql 		.= ",(".crc32($prefix_word).",$token_crc32,".($wordlen-$i).")";
 							++$pr;
 						}
 					}
@@ -203,13 +190,8 @@ try
 					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
 					{
 						$prefix_word = mb_substr($token, 0, $i);
-
-						if ( $pr > 0 ) $insert_prefix_sql .= ",";
-					
-						$insert_prefix_sql 		.= "(?,?,?)";
-						$prefix_escape[] 		= crc32($prefix_word);		 		# prefix crc32 value
-						$prefix_escape[]		= crc32($token);   				 	# original token crc32 checksum
-						$prefix_escape[] 		= $wordlen-$i;			 			# how many characters have been cut of from the original word 
+						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
+						$insert_prefix_sql 		.= ",(".crc32($prefix_word).",$token_crc32,".($wordlen-$i).")";
 						++$pr;
 					}
 					
@@ -217,13 +199,8 @@ try
 					for ( $i = 1 ; $wordlen-$i >= $min_prefix_len ; ++$i )
 					{
 						$prefix_word = mb_substr($token, $i);
-
-						if ( $pr > 0 ) $insert_prefix_sql .= ",";
-					
-						$insert_prefix_sql 		.= "(?,?,?)";
-						$prefix_escape[] 		= crc32($prefix_word);		 		# prefix crc32 value
-						$prefix_escape[]		= crc32($token);   				 	# original token crc32 checksum
-						$prefix_escape[] 		= $i;			 					# how many characters have been cut of from the original word 
+						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
+						$insert_prefix_sql 		.= ",(".crc32($prefix_word).",$token_crc32,$i)";
 						++$pr;
 					}
 				}
@@ -233,13 +210,8 @@ try
 					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
 					{
 						$prefix_word = mb_substr($token, 0, $i); 
-
-						if ( $pr > 0 ) $insert_prefix_sql .= ",";
-					
-						$insert_prefix_sql 		.= "(?,?,?)";
-						$prefix_escape[] 		= crc32($prefix_word);		 		# prefix crc32 value
-						$prefix_escape[]		= crc32($token);   				 	# original token crc32 checksum
-						$prefix_escape[] 		= $wordlen-$i;			 			# how many characters have been cut of from the original word 
+						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
+						$insert_prefix_sql 		.= ",(".crc32($prefix_word).",$token_crc32,".($wordlen-$i).")";
 						++$pr;
 					}
 				}
@@ -249,15 +221,14 @@ try
 		# if we have over 2000 prefixes already, insert them here and reset 
 		if ( $pr > 2000 )
 		{
+			$insert_prefix_sql[0] = " "; # trim the first comma
 			$ins_start = microtime(true);
-			$updpdo = $connection->prepare("INSERT INTO PMBpretemp$index_suffix (checksum, token_checksum, cutlen) VALUES $insert_prefix_sql");
-			$updpdo->execute($prefix_escape);
+			$updpdo = $connection->query("INSERT INTO PMBpretemp$index_suffix (checksum, token_checksum, cutlen) VALUES $insert_prefix_sql");
 			$total_insert_time += (microtime(true) - $ins_start);
 			
 			$prefix_total_count += $pr;
 			# reset variables
 			$insert_prefix_sql = "";
-			$prefix_escape = array();
 			$pr = 0;
 			$log .= "prefix inserts ok \n";
 			$loop_log .= "prefix inserts ok \n";
@@ -269,17 +240,16 @@ try
 
 	# insert rest of the prefixes, if available
 	# if we have over 2000 prefixes already, insert them here and reset 
-	if ( !empty($prefix_escape) )
+	if ( !empty($insert_prefix_sql) )
 	{
+		$insert_prefix_sql[0] = " "; # trim the first comma
 		$ins_start = microtime(true);
-		$updpdo = $connection->prepare("INSERT INTO PMBpretemp$index_suffix (checksum, token_checksum, cutlen) VALUES $insert_prefix_sql");
-		$updpdo->execute($prefix_escape);
+		$updpdo = $connection->query("INSERT INTO PMBpretemp$index_suffix (checksum, token_checksum, cutlen) VALUES $insert_prefix_sql");
 		$total_insert_time += (microtime(true) - $ins_start);
 		
 		$prefix_total_count += $pr;	
 		# reset variables
 		$insert_prefix_sql = "";
-		$prefix_escape = array();
 		$pr = 0;
 		$log .= "residual prefix inserts ok \n";
 		$loop_log .= "residual prefix inserts ok \n";

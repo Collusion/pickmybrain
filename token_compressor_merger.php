@@ -15,6 +15,12 @@ ini_set('memory_limit', '1024M');
 # ==> this file is launched as a separate process
 if ( !isset($process_number) )
 {
+	ini_set("display_errors", 1);
+	error_reporting(E_ALL);
+	mb_internal_encoding("UTF-8");
+	set_time_limit(0);
+	ignore_user_abort(true);
+	
 	# launches as a separate process, so these files are needed
 	require_once("input_value_processor.php");
 	require_once("tokenizer_functions.php");
@@ -75,14 +81,13 @@ try
 	$min_checksum = $start_checksum;
 	$max_checksum = $min_checksum + $scale;
 
-	$where_sql = "WHERE checksum >= $min_checksum AND checksum < $max_checksum";
-	#$modulus_condition = "checksum < $max_checksum";
+	$where_sql = "WHERE PMBdatatemp".$index_suffix.".checksum >= $min_checksum AND PMBdatatemp".$index_suffix.".checksum < $max_checksum";
 
 	if ( $process_number == $dist_threads-1 ) 
 	{
 		# last thread ( with biggest offset ) 
 		$max_checksum = $max_id;
-		$where_sql = "WHERE checksum >= $min_checksum AND checksum <= $max_checksum";
+		$where_sql = "WHERE PMBdatatemp".$index_suffix.".checksum >= $min_checksum AND PMBdatatemp".$index_suffix.".checksum <= $max_checksum";
 	}
 
 	# create a temporary table if this is not the main process
@@ -121,8 +126,6 @@ try
 						 ) ENGINE=INNODB DEFAULT CHARSET=utf8;");
 		}
 	}
-	
-	echo "Target table: $target_table process_id: $process_number \n";
 
 	if ( $dist_threads === 1 ) 
 	{
@@ -131,7 +134,6 @@ try
 	
 	# for fetching data
 	$datatemp_limit = 10000;
-	$sql_query_count		= 0;
 	$sql_query_limit		= ceil($scale / $datatemp_limit);
 
 	$rows = 0;
@@ -139,7 +141,7 @@ try
 	$flush_interval	= 	40;
 	$insert_counter =    0;
 	$w = 0;
-	$insert_sql 	= array();
+	$insert_sql 	= "";
 	$insert_escape 	= array();
 
 	$min_checksum = 0;
@@ -150,29 +152,9 @@ try
 	$doc_ids 	= array();
 	$countarray = array();
 	$sentiscore = array();
-	
-	if ( SPL_EXISTS )
-	{
-		$pdo = $connection->query("SELECT MAX(ID) FROM PMBtoktemp$index_suffix");
-		if ( $values = $pdo->fetchColumn() )
-		{
-			$token_ids = new SplFixedArray($values+1);
-		}
-	}
-	
-	/* Generate [token_id] => token pairs */ 
-	$tokstart = microtime(true);
-	$tokpdo = $unbuffered_connection->query("SELECT ID, token FROM PMBtoktemp$index_suffix $where_sql");
-	
-	while ( $row = $tokpdo->fetch(PDO::FETCH_ASSOC) )
-	{
-		$token_ids[(int)$row["ID"]] = $row["token"];
-	}
 
-	$tokend = microtime(true) - $tokstart;	
 	$token_insert_time = 0;
 	$statistic_total_time = 0;
-	$select_time = 0;
 	
 	/* FOR BINARY DATA */
 	$bin_separator = pack("H*", "80");
@@ -189,19 +171,19 @@ try
 		$senti_sql_index_column = ",sentiscore";
 	}
 
-	$select_start = microtime(true);
-	$subpdo = $unbuffered_connection->query("SELECT checksum,
-											token_id,
+	$subpdo = $unbuffered_connection->query("SELECT 
+											PMBdatatemp".$index_suffix.".checksum, 
+											D.ID as token_id,
+											D.token,
 											doc_id, 
-											token_id_2,
 											count,
-											((token_id_2 << $number_of_fields) | field_id) as combined
+											((COALESCE(T.ID, 0) << $number_of_fields) | field_id) as combined
 											".$senti_sql_index_column."
-											FROM PMBdatatemp$index_suffix
+											FROM PMBdatatemp".$index_suffix."
+											STRAIGHT_JOIN PMBtoktemp".$index_suffix." D ON (D.checksum = PMBdatatemp".$index_suffix.".checksum AND D.minichecksum = PMBdatatemp".$index_suffix.".minichecksum)
+											LEFT JOIN PMBtoktemp".$index_suffix." T ON (T.checksum = PMBdatatemp".$index_suffix.".checksum_2 AND T.minichecksum = PMBdatatemp".$index_suffix.".minichecksum_2)
 											$where_sql
-											ORDER BY checksum, token_id, doc_id, token_id_2");
-	$select_time += (microtime(true)-$select_start);
-	++$sql_query_count;
+											ORDER BY PMBdatatemp".$index_suffix.".checksum, PMBdatatemp".$index_suffix.".minichecksum, doc_id, checksum_2");
 	
 	$last_row = false;
 	$counter = 0;
@@ -213,7 +195,7 @@ try
 	
 	$combinations = 0;
 	$oldreads = 1;
-	$oldpdo = $old_unbuffered_connection->query("SELECT * FROM PMBTokens$index_suffix $where_sql ORDER BY checksum");
+	$oldpdo = $old_unbuffered_connection->query("SELECT * FROM PMBTokens$index_suffix " . str_replace("PMBdatatemp".$index_suffix.".", "", $where_sql) . " ORDER BY checksum");
 	
 	# prefetch first old row
 	$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
@@ -226,11 +208,11 @@ try
 		
 		if ( $row )
 		{
-			$checksum 	= (int)$row["checksum"];
-			$token_id 	= (int)$row["token_id"];
-			$doc_id 	= (int)$row["doc_id"];
-			$token_id_2 = (int)$row["token_id_2"];
-			$combined	= (int)$row["combined"];
+			$checksum 	= +$row["checksum"];
+			$token_id 	= +$row["token_id"];
+			$doc_id 	= +$row["doc_id"];
+			$token		= $row["token"];
+			$combined	= +$row["combined"];
 		}
 		else
 		{
@@ -339,33 +321,28 @@ try
 				$token_data_string .= $bin_separator . $temp_string;
 			}
 
-			# combine data making sure that the ids match !  
-			$checksum_lookup[$min_tok_id] = $min_checksum;
-
-			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) ) # || ($min_checksum == $oldrow["checksum"] && $min_tok_id != $oldrow["ID"] )
+			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) )
 			{
-				$insert_sql[] 	 = "(?,?,?,?,?)";
-				$insert_escape[] = (int)$oldrow["checksum"];
-				$insert_escape[] = 		$oldrow["token"];
-				$insert_escape[] = (int)$oldrow["doc_matches"];
-				$insert_escape[] = (int)$oldrow["ID"];
-				$insert_escape[] = 		$oldrow["doc_ids"];
+				$insert_sql 	.= ",(".$oldrow["checksum"].",
+									".$connection->quote($oldrow["token"]).",
+									".$oldrow["doc_matches"].",
+									".$oldrow["ID"].",
+									".$connection->quote($oldrow["doc_ids"]).")";
 				++$x;
 				++$w;
 				
 				if ( $w >= $write_buffer_len )
 				{				
 					$token_insert_time_start = microtime(true);
-					$ins = $connection->prepare("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES " . implode(",", $insert_sql) );
-					$ins->execute($insert_escape);
+					$insert_sql[0] = " ";
+					$ins = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES $insert_sql");
 					$token_insert_time += (microtime(true)-$token_insert_time_start);
 					$w = 0;
 					++$insert_counter;
 					
 					# reset write buffer
-					unset($insert_sql, $insert_escape);
-					$insert_sql = array();
-					$insert_escape = array();	
+					unset($insert_sql);
+					$insert_sql = "";	
 					
 					if ( $process_number === 0 && $insert_counter >= $flush_interval ) 
 					{
@@ -395,12 +372,11 @@ try
 					$combined_data = $old_doc_ids . $new_doc_id_string . substr($oldrow["doc_ids"], $pos) . $token_data_string; 
 					
 					# add data into write buffer
-					$insert_sql[] 	 = "(?,?,?,?,?)";
-					$insert_escape[] = (int)$oldrow["checksum"];
-					$insert_escape[] = 		$oldrow["token"];
-					$insert_escape[] = (int)$oldrow["doc_matches"] + count($doc_ids);
-					$insert_escape[] = (int)$oldrow["ID"];
-					$insert_escape[] = 		$combined_data;
+					$insert_sql 	.= ",(".$oldrow["checksum"].",
+										".$connection->quote($oldrow["token"]).",
+										".($oldrow["doc_matches"]+count($doc_ids)).",
+										".$oldrow["ID"].",
+										".$connection->quote($combined_data).")";
 					++$combinations;
 					++$x;
 					++$w;
@@ -428,12 +404,11 @@ try
 						$combined_data = $old_doc_ids . $new_doc_id_string . substr($oldrow["doc_ids"], $pos) . $token_data_string; 
 						
 						# add data into write buffer
-						$insert_sql[] 	 = "(?,?,?,?,?)";
-						$insert_escape[] = (int)$oldrow["checksum"];
-						$insert_escape[] = 		$oldrow["token"];
-						$insert_escape[] = (int)$oldrow["doc_matches"] + count($doc_ids);
-						$insert_escape[] = (int)$oldrow["ID"];
-						$insert_escape[] = 		$combined_data;
+						$insert_sql 	.= ",(".$oldrow["checksum"].",
+											".$connection->quote($oldrow["token"]).",
+											".($oldrow["doc_matches"]+count($doc_ids)).",
+											".$oldrow["ID"].",
+											".$connection->quote($combined_data).")";
 						++$combinations;
 						++$x;
 						++$w;
@@ -449,22 +424,20 @@ try
 						if ( $oldrow["checksum"] > $min_checksum ) 
 						{
 							# add current new row first into the write buffer
-							$insert_sql[] 	 = "(?,?,?,?,?)";
-							$insert_escape[] = crc32($token_ids[$min_tok_id]);
-							$insert_escape[] = $token_ids[$min_tok_id];
-							$insert_escape[] = count($doc_ids);
-							$insert_escape[] = $min_tok_id;
-							$insert_escape[] = $doc_id_string . $token_data_string;
+							$insert_sql 	.= ",($min_checksum,
+												".$connection->quote($min_token).",
+												".count($doc_ids).",
+												$min_tok_id,
+												".$connection->quote($doc_id_string . $token_data_string).")";
 							++$x;
 							++$w;
 							
 							# add oldrow copy immediately after current new row
-							$insert_sql[] 	 = "(?,?,?,?,?)";
-							$insert_escape[] = (int)$oldrow_copy["checksum"];
-							$insert_escape[] = 		$oldrow_copy["token"];
-							$insert_escape[] = (int)$oldrow_copy["doc_matches"];
-							$insert_escape[] = (int)$oldrow_copy["ID"];
-							$insert_escape[] = 		$oldrow_copy["doc_ids"];
+							$insert_sql 	.= ",(".$oldrow_copy["checksum"].",
+											".$connection->quote($oldrow_copy["token"]).",
+											".$oldrow_copy["doc_matches"].",
+											".$oldrow_copy["ID"].",
+											".$connection->quote($oldrow_copy["doc_ids"]).")";
 							++$x;
 							++$w;
 							echo "RESOLVED: added current row and olrow_copy \n\n";
@@ -484,41 +457,31 @@ try
 			}
 			else # just insert the current row, because min_checksum < $oldrow["checksum"]
 			{
-				if ( !isset($token_ids[$min_tok_id]) )
-				{
-					echo "not set: $min_tok_id in token_ids counter: $counter \n process_number: $process_number \n";
-				}
-				else
-				{
-					# add current new row first into the write buffer
-					$insert_sql[] 	 = "(?,?,?,?,?)";
-					$insert_escape[] = crc32($token_ids[$min_tok_id]);
-					$insert_escape[] = $token_ids[$min_tok_id];
-					$insert_escape[] = count($doc_ids);
-					$insert_escape[] = $min_tok_id;
-					$insert_escape[] = $doc_id_string . $token_data_string;
-					++$x;
-					++$w;
-				}
+				# add current new row first into the write buffer
+				$insert_sql 	.= ",($min_checksum,
+									".$connection->quote($min_token).",
+									".count($doc_ids).",
+									$min_tok_id,
+									".$connection->quote($doc_id_string . $token_data_string).")";
+				++$x;
+				++$w;	
 			}
 			
 			# free some memory
 			unset($doc_id_string, $token_data_string, $temp_string, $temp_doc_ids);
 	
-			
 			if ( $w >= $write_buffer_len )
 			{				
 				$token_insert_time_start = microtime(true);
-				$ins = $connection->prepare("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES " . implode(",", $insert_sql) );
-				$ins->execute($insert_escape);
+				$insert_sql[0] = " ";
+				$ins = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES $insert_sql");
 				$token_insert_time += (microtime(true)-$token_insert_time_start);
 				$w = 0;
 				++$insert_counter;
 				
 				# reset write buffer
-				unset($insert_sql, $insert_escape);
-				$insert_sql = array();
-				$insert_escape = array();	
+				unset($insert_sql);
+				$insert_sql = "";	
 				
 				if ( $process_number === 0 && $insert_counter >= $flush_interval ) 
 				{
@@ -550,7 +513,7 @@ try
 		$min_checksum 	= $checksum;
 		$min_tok_id 	= $token_id;
 		$min_doc_id 	= $doc_id;
-		$min_tok_2_id 	= $token_id_2;	
+		$min_token		= $token;
 		
 		# check premissions every 10000th row
 		if ( $counter % 10000 === 0 ) 
@@ -583,44 +546,37 @@ try
 			$counter = 0;
 		}
 	}
-	
-	# remnants of the write buffer
-	if ( !empty($insert_escape) )
-	{
-		$token_insert_time_start = microtime(true);
-		$ins = $connection->prepare("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES " . implode(",", $insert_sql) );
-		$ins->execute($insert_escape);
-		$token_insert_time += (microtime(true)-$token_insert_time_start);
-		
-		# reset write buffer
-		unset($insert_sql, $insert_escape);
-		$insert_counter = 0;
-	}
-	
+
 	$latent_oldreads = 0;
 	# fetch rest of the old tokens
 	while ( $oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC) )
 	{
-		$insert_sql[] 	 = "(?,?,?,?,?)";
-		$insert_escape[] = (int)$oldrow["checksum"];
-		$insert_escape[] = 		$oldrow["token"];
-		$insert_escape[] = (int)$oldrow["doc_matches"];
-		$insert_escape[] = (int)$oldrow["ID"];
-		$insert_escape[] = 		$oldrow["doc_ids"];
+		$insert_sql 	.= ",(".$oldrow["checksum"].",
+							".$connection->quote($oldrow["token"]).",
+							".$oldrow["doc_matches"].",
+							".$oldrow["ID"].",
+							".$connection->quote($oldrow["doc_ids"]).")";
 		++$x;
 		++$w;
 		
 		if ( $w >= $write_buffer_len )
 		{				
 			$token_insert_time_start = microtime(true);
-			$ins = $connection->prepare("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES " . implode(",", $insert_sql) );
-			$ins->execute($insert_escape);
+			$insert_sql[0] = " ";
+			$ins = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES $insert_sql");
 			$token_insert_time += (microtime(true)-$token_insert_time_start);
 			$w = 0;
 			++$insert_counter;
-			unset($insert_sql, $insert_escape);
-			$insert_sql = array();
-			$insert_escape = array();
+			unset($insert_sql);
+			$insert_sql = "";
+			
+			# commit changes if necessary
+			if ( $process_number === 0 && $insert_counter >= $flush_interval ) 
+			{
+				$connection->commit();
+				$connection->beginTransaction();
+				$insert_counter = 0;
+			}
 		}
 
 		++$latent_oldreads;
@@ -628,15 +584,16 @@ try
 	}
 	
 	# remnants of the write buffer
-	if ( !empty($insert_escape) )
+	if ( !empty($insert_sql) )
 	{
 		$token_insert_time_start = microtime(true);
-		$ins = $connection->prepare("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES " . implode(",", $insert_sql) );
-		$ins->execute($insert_escape);
+		$insert_sql[0] = " ";
+		$ins = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES $insert_sql");
 		$token_insert_time += (microtime(true)-$token_insert_time_start);
 		
 		# reset write buffer
-		unset($insert_sql, $insert_escape);
+		unset($insert_sql);
+		$insert_sql = "";
 		$insert_counter = 0;
 	}
 }
@@ -681,9 +638,6 @@ echo "Oldreads: $oldreads \n";
 echo "Latent oldreads: $latent_oldreads \n";
 try
 {
-	#$oldpdo = $old_unbuffered_connection->query("SELECT * FROM PMBTokens$index_suffix");
-	#$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
-
 	$transfer_time_start = microtime(true);
 	for ( $i = 1 ; $i < $dist_threads ; ++$i ) 
 	{
@@ -691,15 +645,15 @@ try
 		$temppdo = $unbuffered_connection->query($sql);
 		$connection->beginTransaction();
 		$w = 0;
+		$ins_sql = "";
 		$insert_counter = 0;
 		while ( $row = $temppdo->fetch(PDO::FETCH_ASSOC) )
 		{
 			if ( $w >= $write_buffer_len ) 
 			{
-				$inspdo = $connection->prepare("INSERT INTO $target_table ( checksum, token, doc_matches, ID, doc_ids ) VALUES " . implode(",", $ins_sql) );
-				$inspdo->execute($escape);
-				$ins_sql = array();
-				$escape = array();
+				$ins_sql[0] = " ";
+				$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, doc_matches, ID, doc_ids ) VALUES $ins_sql");
+				$ins_sql = "";
 				$w = 0;
 				++$insert_counter;
 				
@@ -711,12 +665,11 @@ try
 				}
 			}
 	
-			$ins_sql[] = "(?, ?, ?, ?, ?)";
-			$escape[] = $row["checksum"];
-			$escape[] = $row["token"];
-			$escape[] = $row["doc_matches"];
-			$escape[] = $row["ID"];
-			$escape[] = $row["doc_ids"];
+			$ins_sql 	.= ",(".$row["checksum"].",
+						".$connection->quote($row["token"]).",
+						".$row["doc_matches"].",
+						".$row["ID"].",
+						".$connection->quote($row["doc_ids"]).")";
 			++$w;	
 		}
 		
@@ -725,24 +678,18 @@ try
 		# rest of the values
 		if ( !empty($escape) ) 
 		{
-			$inspdo = $connection->prepare("INSERT INTO $target_table ( checksum, token, doc_matches, ID, doc_ids ) VALUES " . implode(",", $ins_sql) );
-			$inspdo->execute($escape);
-			$ins_sql = array();
-			$escape = array();
+			$ins_sql[0] = " ";
+			$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, doc_matches, ID, doc_ids ) VALUES $ins_sql");
+			$ins_sql = "";
 			$insert_counter = 0;
 		}
 		
 		$connection->commit();
-		#$connection->query("DROP TABLE IF EXISTS PMBtemporary".$index_suffix."_$i");
+		$connection->query("DROP TABLE IF EXISTS PMBtemporary".$index_suffix."_$i");
 	}
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
-		
-	#$transfer_time_start = microtime(true);
-	#$connection->query("ALTER TABLE $target_table ADD PRIMARY KEY(checksum, token), ENGINE=INNODB $innodb_row_format_sql"); # ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16 doc_matches, ID
-	#$conversion_time = microtime(true)-$transfer_time_start;
-	#echo "Converting tokens-table to INNODB took $transfer_time_end seconds \n";
-	
+
 	if ( !$clean_slate )
 	{
 		$drop_start = microtime(true);
@@ -762,12 +709,18 @@ catch ( PDOException $e )
 	echo $e->getMessage();
 }
 
-
+try
+{
+	# remove the temporary table
+	$connection->exec("DROP TABLE PMBdatatemp$index_suffix");	
+}
+catch ( PDOException $e ) 
+{
+	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
+}
 
 $tokens_end = microtime(true) - $tokens_start;
 
-echo "\nSelecting data from database took $select_time seconds \n";
-echo "Copying relevant dictionary into RAM took $tokend seconds \n";
 echo "Inserting tokens into temp tables took $token_insert_time seconds \n";
 echo "Updating statistics took $statistic_total_time seconds \n";
 echo "Combining temp tables took $transfer_time_end seconds \n";

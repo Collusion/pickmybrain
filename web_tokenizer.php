@@ -164,13 +164,6 @@ try
 	$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP() WHERE ID = ?");
 	$upd_state->execute(array($index_id));
 	
-	# preload dictionary ( if exists already ) 
-	$dictpdo = $connection->query("SELECT token, ID FROM PMBTokens$index_suffix;");
-	while ( $row = $dictpdo->fetch(PDO::FETCH_ASSOC) )
-	{
-		$pre_existing_tokens[$row["token"]] = (int)$row["ID"];
-	}
-	
 	$data_dir_sql = "";
 	if ( !empty($mysql_data_dir) )
 	{
@@ -181,23 +174,35 @@ try
 
 	$senti_sql_column = "";
 	$senti_sql_index_column = "";
+	$senti_insert_sql_column = "";
 	if ( $sentiment_analysis )
 	{
 		$senti_sql_column = "sentiscore tinyint(3) NOT NULL,";
 		$senti_sql_index_column = ",sentiscore";
+		$senti_insert_sql_column = "sentiscore,";
 	}
 
 	$connection->exec("DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
 								CREATE TABLE IF NOT EXISTS PMBdatatemp$index_suffix (
 								checksum int(10) unsigned NOT NULL,
-								token_id mediumint(10) unsigned NOT NULL,
+								minichecksum smallint(7) unsigned NOT NULL,
 								doc_id int(10) unsigned NOT NULL,
 								count tinyint(3) unsigned NOT NULL,
 							 	field_id tinyint(3) unsigned NOT NULL,
 								".$senti_sql_column."
-								token_id_2 mediumint(10) unsigned NOT NULL,
-							 	KEY (checksum,token_id,doc_id,token_id_2,field_id,count ".$senti_sql_index_column.")
+								checksum_2 int(10) unsigned,
+								minichecksum_2 smallint(7) unsigned,
+							 	KEY (checksum,minichecksum,doc_id,checksum_2,minichecksum_2,field_id,count ".$senti_sql_index_column.")
 								) $temporary_table_type PACK_KEYS=1");
+								
+	# create new temporary tables				   
+	$connection->exec("DROP TABLE IF EXISTS PMBpretemp$index_suffix;
+						CREATE TABLE IF NOT EXISTS PMBpretemp$index_suffix (
+						checksum int(10) unsigned NOT NULL,
+						token_checksum int(10) unsigned NOT NULL,
+						cutlen tinyint(3) unsigned NOT NULL,
+						KEY (checksum, cutlen, token_checksum)
+						) $temporary_table_type PACK_KEYS=1");
 			
 	if ( $clean_slate ) 
 	{				
@@ -209,21 +214,14 @@ try
 		# create new temporary tables		   
 		$connection->exec("DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
 							CREATE TABLE IF NOT EXISTS PMBtoktemp$index_suffix (
-							checksum int(10) unsigned NOT NULL,
 							token varbinary(40) NOT NULL,
-							ID mediumint(10) unsigned NOT NULL AUTO_INCREMENT,
-							KEY(ID),
-							UNIQUE (token)
-							) $temporary_table_type");
-									
-		# create new temporary tables				   
-		$connection->exec("DROP TABLE IF EXISTS PMBpretemp$index_suffix;
-							CREATE TABLE IF NOT EXISTS PMBpretemp$index_suffix (
+							ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
 							checksum int(10) unsigned NOT NULL,
-							token_checksum int(10) unsigned NOT NULL,
-							cutlen tinyint(3) unsigned NOT NULL,
-							KEY (checksum, cutlen, token_checksum)
-						) $temporary_table_type PACK_KEYS=1");
+							minichecksum smallint(5) unsigned NOT NULL,
+							PRIMARY KEY (token),
+							KEY ID (ID),
+							KEY checksum (checksum,minichecksum,ID)
+							) ENGINE=MYISAM DEFAULT CHARSET=utf8 $data_dir_sql");
 	}
 
 	# disable non-unique keys					 
@@ -1146,6 +1144,8 @@ while ( !empty($url_list[$lp]) )
 					}
 				}
 				
+				$temporary_token_ids[$match] = true;
+				
 				$first_token = $match;
 			}
 		}
@@ -1162,6 +1162,8 @@ while ( !empty($url_list[$lp]) )
 			{
 				$token_pairs[$first_token][NULL] = array(1, 1 << $field_id);
 			}
+			
+			$temporary_token_ids[$first_token] = true;
 		}
 	}
 
@@ -1179,7 +1181,6 @@ while ( !empty($url_list[$lp]) )
 					$connection->query("UPDATE PMBCategories$index_suffix SET count = count + 1 WHERE ID = $cat_id");
 				}
 			}
-			
 		}
 
 		$aw = $awaiting_writes;
@@ -1197,68 +1198,6 @@ while ( !empty($url_list[$lp]) )
 		$loop_log .= "docinfo ok \n";
 		$loop_log .= "prepdo ok \n";
 
-		$insert_token_sql 	= "INSERT INTO PMBtoktemp$index_suffix (token, checksum) VALUES ";
-		$in = 0;
-		$insert_escape 	= array();
-		
-		# the rest of the tokens can be inserted directly as they're new ( if any of them is actually new )
-		if ( !empty($token_pairs) )
-		{
-			# prefixes have also to be  inserted at the same time ! 		
-			foreach ( $token_pairs as $token => $tokenlist ) 
-			{
-				if ( isset($pre_existing_tokens[$token]) )
-				{
-					# token already exists, no need to create insert sql or prefixes
-					continue;
-				}
-					
-				# this is a new token, create insert syntax here
-				if ( $in > 0 ) $insert_token_sql .= ", ";
-				
-				$insert_token_sql 		   .= "(:tok$in, CRC32(:tok$in))";
-				$insert_escape[":tok$in"] = $token;		  		# token
-				++$in;		
-			}
-	
-			# insert the new tokens ( shouldn't be any collisions )			
-			if ( !empty($insert_escape) )
-			{ 
-				$log .= "straight inserts start \n";
-				$loop_log .= "straight inserts start \n";
-			
-				$inpdo = $connection->prepare($insert_token_sql);
-				$inpdo->execute($insert_escape);
-				$last_insert_id = $connection->lastInsertId(); # last insert id is the db id of the first inserted row
-				
-				# now mark newly inserted tokens as pre-existing
-				$tok_pointer = $last_insert_id;
-				foreach ( $token_pairs as $token => $tokenlist )
-				{
-					if ( isset($pre_existing_tokens[$token]) )
-					{
-						# skip because token has not been inserted ( as it pre-exists ) 
-						continue;
-					}
-					
-					# create [token] => db_row_id pairs for newly inserted tokens
-					$pre_existing_tokens[$token] = $tok_pointer++;              
-				}
-				
-				$log .= "straight inserts ok \n";
-				$loop_log .= "straight inserts ok \n";
-			}
-			else
-			{
-				$log .= "no new tokens to insert... \n";
-				$loop_log .= "no new tokens to insert... \n";
-			}
-		}
-
-		/*
-			NOW ALL PRE-EXISTING TOKENS ARE STORED INTO $pre_existing_tokens[token] => db_row_id
-		*/
-		
 		$aw = $awaiting_writes;
 		
 		# update token stats and insert new occuranges
@@ -1281,33 +1220,34 @@ while ( !empty($url_list[$lp]) )
 				$wordsentiscore = $word_sentiment_scores[$token];
 			}
 			
-			$tid = $pre_existing_tokens[$token];
 			$crc32 = crc32($token);
-			#$update_token_count[] = $tid;
+			$b = md5($token);
+			$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
 			
 			# generate a list of token pairs to insert for this doc_id
 			foreach ( $tokenlist as $second_token => $token_data ) 
 			{
-				if ( empty($second_token) )
+				if ( !isset($second_token) )
 				{
-					$second_token_row_id = 0;
-				}
-				else if ( isset($pre_existing_tokens[$second_token]) )
-				{
-					$second_token_row_id = $pre_existing_tokens[$second_token];	
+					# no second token present
+					$second_token_checksum = "NULL"; 
+					$second_minichecksum   = "NULL"; 
 				}
 				else
 				{
-					# this shouldn't happen!
-					$second_token_row_id = 0;
-					echo "this should not happen, token: $second_token \n";
-					continue;
+					$second_token_checksum = crc32($second_token);
+					$b = md5($second_token);
+					$second_minichecksum = hexdec($b[0].$b[1].$b[2].$b[3]);
 				}
 				
-				if ( $up > 0 ) $insert_data_sql .= ",";
-				
-				$insert_data_sql	.= "($crc32, $tid, :doc_id$aw, $real_token_count, $wordsentiscore, $second_token_row_id, " . $token_data[1] . ")";
-				++$up;
+				if ( $sentiment_analysis ) 
+				{
+					$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $real_token_count, $wordsentiscore, $second_token_checksum, $second_minichecksum," . $token_data[1] . ")";
+				}
+				else
+				{
+					$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $real_token_count, $second_token_checksum, $second_minichecksum," . $token_data[1] . ")";
+				}
 			}
 			
 			$temporary_ids[$aw] = true;
@@ -1319,6 +1259,20 @@ while ( !empty($url_list[$lp]) )
 		# update token statistics
 		if ( $awaiting_writes % $write_buffer_len === 0 ) 
 		{			
+			if ( !empty($temporary_token_ids) && count($temporary_token_ids) > 20000 )
+			{
+				$tempsql = "";
+				foreach ( $temporary_token_ids as $token => $val ) 
+				{
+					$b = md5($token);
+					$minichecksum = hexdec($b[0].$b[1].$b[2].$b[3]);
+					$tempsql .= ",(".$connection->quote($token).", ".crc32($token).", ".$minichecksum.")";
+				}
+				$tempsql[0] = " ";
+				$tokpdo = $connection->query("INSERT IGNORE INTO PMBtoktemp$index_suffix (token, checksum, minichecksum) VALUES $tempsql");
+				unset($temporary_token_ids);
+			}
+		
 			# update temporary statistics
 			$connection->query("UPDATE PMBIndexes SET 
 						temp_loads = temp_loads + $awaiting_writes,
@@ -1360,7 +1314,15 @@ while ( !empty($url_list[$lp]) )
 			$log .= "token data inserts start  \n";
 			$loop_log .= "token data inserts start  \n";
 			# checksum,token_id,doc_id,token_id_2,field_id,count,sentiscore
-			$datapdo = $connection->prepare("INSERT INTO PMBdatatemp$index_suffix (checksum, token_id, doc_id, count, sentiscore, token_id_2, field_id) VALUES $insert_data_sql");
+			$insert_data_sql[0] = " "; 
+			$datapdo = $connection->prepare("INSERT INTO PMBdatatemp$index_suffix (checksum,
+																				minichecksum, 
+																				doc_id, 
+																				count, 
+																				".$senti_insert_sql_column." 
+																				checksum_2,
+																				minichecksum_2, 
+																				field_id) VALUES $insert_data_sql");
 			$datapdo->execute($insert_data_escape);
 			
 			$log .= "token data inserts OK  \n";
@@ -1426,6 +1388,20 @@ try
 {
 	if ( $awaiting_writes )
 	{
+		if ( !empty($temporary_token_ids) )
+		{
+			$tempsql = "";
+			foreach ( $temporary_token_ids as $token => $val ) 
+			{
+				$b = md5($token);
+				$minichecksum = hexdec($b[0].$b[1].$b[2].$b[3]);
+				$tempsql .= ",(".$connection->quote($token).", ".crc32($token).", ".$minichecksum.")";
+			}
+			$tempsql[0] = " ";
+			$tokpdo = $connection->query("INSERT IGNORE INTO PMBtoktemp$index_suffix (token, checksum, minichecksum) VALUES $tempsql");
+			unset($temporary_token_ids);
+		}
+		
 		# update temporary statistics
 		$connection->query("UPDATE PMBIndexes SET 
 					temp_loads = temp_loads + $awaiting_writes,
@@ -1467,7 +1443,15 @@ try
 		$log .= "token data inserts start  \n";
 		$loop_log .= "token data inserts start  \n";
 		
-		$datapdo = $connection->prepare("INSERT INTO PMBdatatemp$index_suffix (checksum, token_id, doc_id, count, sentiscore, token_id_2, field_id) VALUES $insert_data_sql");
+		$insert_data_sql[0] = " "; 
+		$datapdo = $connection->prepare("INSERT INTO PMBdatatemp$index_suffix (checksum,
+																				minichecksum, 
+																				doc_id, 
+																				count, 
+																				".$senti_insert_sql_column." 
+																				checksum_2,
+																				minichecksum_2, 
+																				field_id) VALUES $insert_data_sql");
 		$datapdo->execute($insert_data_escape);
 		
 		$log .= "token data inserts OK  \n";
@@ -1518,9 +1502,6 @@ catch ( PDOException $e )
 	echo "an error occurred during updating the remaining token rows \n" . $e->getMessage() . "\n";
 }
 	
-# these are not needed anymore
-unset($pre_existing_tokens);	
-	
 if ( $test_mode )
 {
 	echo $log;
@@ -1554,8 +1535,7 @@ try
 						current_state = 3, 
 						indexing_permission = 1, 
 						temp_loads = 0, 
-						temp_loads_left = 0,
-						documents = documents + $awaiting_writes
+						temp_loads_left = 0
 						WHERE ID = $index_id");
 	
 	$key_start = microtime(true);
@@ -1563,8 +1543,8 @@ try
 	
 
 	# before anything else, build indexes for temporary tables
-	$connection->exec("ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;");
-	
+	$connection->exec("ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;
+					   ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;");
 	
 	$key_end = microtime(true) - $key_start;					
 	echo "Enabling keys took: $key_end seconds \n";					
@@ -1613,10 +1593,17 @@ else
 }
 
 $tokens_end = microtime(true) - $tokens_start;
-#echo "Compressing token data took $tokens_end seconds \ncontinuing index compression ( prefixes ), current pos $progress out of $total_rows \n";
 
 # rum prefix compressor
-require_once("prefix_compressor.php");
+if ( $clean_slate ) 
+{
+	require_once("prefix_compressor.php");
+}
+else
+{
+	require_once("prefix_compressor_merger.php");
+}
+
 
 $timer_end = microtime(true) - $timer;
 echo "The whole operation took $timer_end seconds \n";
@@ -1637,20 +1624,8 @@ catch ( PDOException $e )
 	echo "An error occurred when updating statistics: " . $e->getMessage() . "\n";
 }
 
-# print debug information
-if ( $test_mode ) 
-{
-	mail("ruutinen@gmail.com", "log", $log, 'From: postmaster@hollilla.com <postmaster@hollilla.com>', "-f postmaster@hollilla.com -r postmaster@hollilla.com");
-	echo $log;
-}
-
-#echo "</textarea>";
-
 # update current indexing state to false ( 0 ) 
 SetIndexingState(0, $index_id);
-
-
-
 
 
 ?>
