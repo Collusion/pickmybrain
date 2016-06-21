@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   0.83 BETA 
-Published: 07.06.2016
+Version:   0.84 BETA 
+Published: 21.06.2016
 
 copyright 2015-2016 Henri Ruutinen 
 
