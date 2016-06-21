@@ -18,6 +18,13 @@ programming language and MySQL as data storage solution.
 Pickmybrain enables users to index databases, websites and
 PDF files. 
 
+Pickmybrain does not rely on the existing full-text search feature 
+of MySQL but uses it's proprietary compressed inverted index 
+architecture. This provides fast searching times even for large search 
+indexes consisting of millions of documents. Pickmybrain ranks 
+documents with phrase proximity AND bm25 algorithms ( although this 
+is user-configurable ), which is also a clear improvement over 
+the MySQL's default full-text search feature. 
 
 License
 -------
