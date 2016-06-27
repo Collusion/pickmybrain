@@ -148,10 +148,6 @@ try
 	$min_tok_id = 0;
 	$min_doc_id = 0;
 	$min_tok_2_id = 0;
-	
-	$doc_ids 	= array();
-	$countarray = array();
-	$sentiscore = array();
 
 	$token_insert_time = 0;
 	$statistic_total_time = 0;
@@ -170,6 +166,11 @@ try
 	{
 		$senti_sql_index_column = ",sentiscore";
 	}
+	
+	# get initial memory usage
+	$write_buffer_size	  = 20*1024*1024;
+	$initial_memory_usage = memory_get_usage();
+	$memory_usage_limit	  = $initial_memory_usage + $write_buffer_size;
 
 	$subpdo = $unbuffered_connection->query("SELECT 
 											PMBdatatemp".$index_suffix.".checksum, 
@@ -187,6 +188,14 @@ try
 	
 	$last_row = false;
 	$counter = 0;
+	
+	$document_hit_count		= 0;
+	$document_senti_score 	= 0;
+	$document_count			= 0;
+	$m_delta 				= 1; # for deltaencoding
+	$doc_id_string 			= "";
+	$token_data_string 		= "";
+	$last_string			= false;
 	
 	if ( $process_number === 0 ) 
 	{
@@ -224,103 +233,122 @@ try
 				break;
 			}
 		}
-
-		# token_id changes now ! 
-		if ( ($min_checksum > $start_checksum && $token_id !== $min_tok_id) || $last_row ) 
+		
+		# document has changed => compress old data
+		if ( ($min_checksum > $start_checksum && ($doc_id !== $min_doc_id || $token_id !== $min_tok_id)) || $last_row ) 
 		{
-			ksort($doc_ids);
-			# document ids should be in ascending order
-			$doc_id_string = "";
-			$token_data_string = "";
-			$last_string = false;
-			$temp_doc_ids = array();
-			
-			foreach ( $doc_ids as $d_id => $data_value )
-			{	
-				$temp_doc_ids[] = $d_id;
-			
-				if ( $sentiment_analysis )
+			++$document_count;
+			/* DeltaVBencode the document id here */
+			$tmp = $min_doc_id-$m_delta+1;
+			do
+			{
+				$lowest7bits = $tmp & 127;
+				$tmp >>= 7;
+					
+				if ( $tmp ) 
 				{
-					if ( $sentiscore[$d_id] < -128 ) 
-					{
-						$sentiscore[$d_id] = -128;
-					}
-					else if ( $sentiscore[$d_id] > 127 )
-					{
-						$sentiscore[$d_id] = 127;
-					}
-			
-					# combine the count of tokens and sentiment score into one number
-					$integer = ($countarray[$d_id] << 8) | ($sentiscore[$d_id]+128);
+					$doc_id_string .= $hex_lookup_encode[$lowest7bits];
 				}
 				else
 				{
-					$integer = $countarray[$d_id];
+					$doc_id_string .= $hex_lookup_encode[(128 | $lowest7bits)];
 				}
+			}
+			while ( $tmp ) ;
+			$m_delta = $min_doc_id;
+			
+			/* */
+			if ( $sentiment_analysis )
+			{
+				if ( $document_senti_score < -128 ) 
+				{
+					$document_senti_score = -128;
+				}
+				else if ( $document_senti_score > 127 )
+				{
+					$document_senti_score = 127;
+				}
+		
+				# combine the count of tokens and sentiment score into one number
+				$integer = ($document_hit_count << 8) | ($document_senti_score+128);
+			}
+			else
+			{
+				$integer = $document_hit_count;
+			}
+			
+			/* VBencode the document hit count here */
+			$temp_string = "";
+			do
+			{
+				# get 7 LSB bits
+				$lowest7bits = $integer & 127;
 				
-				# then vbencode the value here
-				$temp_string = "";
+				# shift original number >> 7 
+				$integer = $integer >> 7;
+				
+				if ( $integer ) 
+				{
+					# number is yet to end, prepend 0 ( or actually do nothing :)
+					$temp_string .= $hex_lookup_encode[$lowest7bits];
+				}
+				else
+				{
+					# number ends here, prepend 1
+					$temp_string .= $hex_lookup_encode[(128 | $lowest7bits)];
+				}
+			}
+			while ( $integer ) ;
+
+			/* DeltaVBencode token/document match data here */
+			asort($token_match_data);	
+			$delta = 1;
+			foreach ( $token_match_data as $datavalue )
+			{
+				$tmp = $datavalue-$delta+1;
+				
 				do
 				{
-					# get 7 LSB bits
-					$lowest7bits = $integer & 127;
+					$lowest7bits = $tmp & 127;
+					$tmp >>= 7;
 					
-					# shift original number >> 7 
-					$integer = $integer >> 7;
-					
-					if ( $integer ) 
+					if ( $tmp ) 
 					{
-						# number is yet to end, prepend 0 ( or actually do nothing :)
 						$temp_string .= $hex_lookup_encode[$lowest7bits];
 					}
 					else
 					{
-						# number ends here, prepend 1
 						$temp_string .= $hex_lookup_encode[(128 | $lowest7bits)];
 					}
 				}
-				while ( $integer ) ;
-
-				# sort / compress token hits for current document id ( d_id ) here
-				asort($doc_ids[$d_id]);	
-				$delta = 1;
-				
-				foreach ( $doc_ids[$d_id] as $datavalue )
-				{
-					$tmp = $datavalue-$delta+1;
-					
-					do
-					{
-						$lowest7bits = $tmp & 127;
-						$tmp >>= 7;
-						
-						if ( $tmp ) 
-						{
-							$temp_string .= $hex_lookup_encode[$lowest7bits];
-						}
-						else
-						{
-							$temp_string .= $hex_lookup_encode[(128 | $lowest7bits)];
-						}
-					}
-					while ( $tmp ) ;
-			
-					$delta = $datavalue;
-				}
-				
-				if ( $temp_string === $last_string ) 
-				{
-					# no need to store this string :)
-					$temp_string = "";
-				}
-				else
-				{
-					$last_string = $temp_string;
-				}
-				
-				$token_data_string .= $bin_separator . $temp_string;
+				while ( $tmp ) ;
+		
+				$delta = $datavalue;
 			}
+			
+			if ( $temp_string === $last_string ) 
+			{
+				# no need to store this string :)
+				$temp_string = "";
+			}
+			else
+			{
+				$last_string = $temp_string;
+			}
+			
+			$token_data_string .= $bin_separator . $temp_string;
+			
+			# reset variables
+			unset($temp_string, $token_match_data);
+			$document_hit_count 	= 0;
+			$document_senti_score 	= 0;
+			$token_match_data 		= array();
+		}
 
+		# token_id changes now ! 
+		if ( ($min_checksum > $start_checksum && $token_id !== $min_tok_id) || $last_row ) 
+		{
+			/*  fetch and insert the old data into the new table */
 			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) )
 			{
 				$insert_sql 	.= ",(".$oldrow["checksum"].",
@@ -331,7 +359,7 @@ try
 				++$x;
 				++$w;
 				
-				if ( $w >= $write_buffer_len )
+				if ( $w >= $write_buffer_len || (memory_get_usage() > $memory_usage_limit)  )
 				{				
 					$token_insert_time_start = microtime(true);
 					$insert_sql[0] = " ";
@@ -360,23 +388,18 @@ try
 			# if these rows are to be combined
 			if ( $oldrow && $min_checksum == $oldrow["checksum"]  )
 			{
-				if ( $min_tok_id == $oldrow["ID"] ) # && $min_tok_id == $oldrow["ID"]
+				if ( $min_tok_id == $oldrow["ID"] ) 
 				{
 					# combine data !
 					$pos = strpos($oldrow["doc_ids"], $bin_separator);
 					$old_doc_ids = substr($oldrow["doc_ids"], 0, $pos);
-						
-					$max_doc_id = VBDeltaStringMaxValue($old_doc_ids, $hex_lookup_decode);
-					$new_doc_id_string = DeltaVBencode($temp_doc_ids, $hex_lookup_encode, $max_doc_id);
-						
-					$combined_data = $old_doc_ids . $new_doc_id_string . substr($oldrow["doc_ids"], $pos) . $token_data_string; 
-					
+	
 					# add data into write buffer
 					$insert_sql 	.= ",(".$oldrow["checksum"].",
 										".$connection->quote($oldrow["token"]).",
-										".($oldrow["doc_matches"]+count($doc_ids)).",
+										".($oldrow["doc_matches"]+$document_count).",
 										".$oldrow["ID"].",
-										".$connection->quote($combined_data).")";
+										".$connection->quote(MergeCompressedData($old_doc_ids, $doc_id_string, $hex_lookup_decode, $hex_lookup_encode) . substr($oldrow["doc_ids"], $pos) . $token_data_string).")";
 					++$combinations;
 					++$x;
 					++$w;
@@ -397,24 +420,18 @@ try
 						# combine old data with new data !
 						$pos = strpos($oldrow["doc_ids"], $bin_separator);
 						$old_doc_ids = substr($oldrow["doc_ids"], 0, $pos);
-						
-						$max_doc_id = VBDeltaStringMaxValue($old_doc_ids, $hex_lookup_decode);
-						$new_doc_id_string = DeltaVBencode($temp_doc_ids, $hex_lookup_encode, $max_doc_id);
-						
-						$combined_data = $old_doc_ids . $new_doc_id_string . substr($oldrow["doc_ids"], $pos) . $token_data_string; 
-						
+	
 						# add data into write buffer
 						$insert_sql 	.= ",(".$oldrow["checksum"].",
 											".$connection->quote($oldrow["token"]).",
-											".($oldrow["doc_matches"]+count($doc_ids)).",
+											".($oldrow["doc_matches"]+$document_count).",
 											".$oldrow["ID"].",
-											".$connection->quote($combined_data).")";
+											".$connection->quote(MergeCompressedData($old_doc_ids, $doc_id_string, $hex_lookup_decode, $hex_lookup_encode) . substr($oldrow["doc_ids"], $pos) . $token_data_string).")";
 						++$combinations;
 						++$x;
 						++$w;
 						
 						echo "RESOLVED: OLD: checksum ".$oldrow["checksum"]." min_tok_id: ".$oldrow["ID"]." \n\n";
-						
 						$oldrow = $oldrow_copy; # this row is not yet inserted 
 					}
 					else
@@ -426,7 +443,7 @@ try
 							# add current new row first into the write buffer
 							$insert_sql 	.= ",($min_checksum,
 												".$connection->quote($min_token).",
-												".count($doc_ids).",
+												$document_count,
 												$min_tok_id,
 												".$connection->quote($doc_id_string . $token_data_string).")";
 							++$x;
@@ -460,7 +477,7 @@ try
 				# add current new row first into the write buffer
 				$insert_sql 	.= ",($min_checksum,
 									".$connection->quote($min_token).",
-									".count($doc_ids).",
+									$document_count,
 									$min_tok_id,
 									".$connection->quote($doc_id_string . $token_data_string).")";
 				++$x;
@@ -468,9 +485,14 @@ try
 			}
 			
 			# free some memory
-			unset($doc_id_string, $token_data_string, $temp_string, $temp_doc_ids);
-	
-			if ( $w >= $write_buffer_len )
+			unset($doc_id_string, $token_data_string, $temp_string);
+			$m_delta 			= 1;
+			$document_count		= 0;
+			$doc_id_string 		= "";
+			$token_data_string 	= "";
+			$last_string		= false;
+
+			if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit )
 			{				
 				$token_insert_time_start = microtime(true);
 				$insert_sql[0] = " ";
@@ -489,24 +511,15 @@ try
 					$connection->beginTransaction();
 					$insert_counter = 0;
 				}
-			}
-
-			# reset temporary variables
-			unset($doc_ids, $countarray, $sentiscore);
-			$doc_ids 	= array();
-			$countarray = array();
-			$sentiscore = array();
+			}	
 		}
 
-		if ( empty($doc_ids[$doc_id]) ) $doc_ids[$doc_id] = array();
-		if ( empty($countarray[$doc_id]) ) $countarray[$doc_id] = 0;		
-		$doc_ids[$doc_id][] = $combined;
-		$countarray[$doc_id] += (int)$row["count"];
-		
+		$token_match_data[] = $combined;
+		$document_hit_count += +$row["count"];
+
 		if ( $sentiment_analysis ) 
 		{
-			if ( empty($sentiscore[$doc_id]) ) $sentiscore[$doc_id] = 0;
-			$sentiscore[$doc_id] += (int)$row["sentiscore"];
+			$document_senti_score += +$row["sentiscore"];
 		}
 		
 		# gather and write data
@@ -559,7 +572,7 @@ try
 		++$x;
 		++$w;
 		
-		if ( $w >= $write_buffer_len )
+		if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit )
 		{				
 			$token_insert_time_start = microtime(true);
 			$insert_sql[0] = " ";
@@ -629,13 +642,30 @@ if ( isset($oldpdo) )
 	unset($oldpdo);
 }
 
+unset($row, $oldrow);
+
 # wait for another processes to finish
 require("process_listener.php");
 
+$initial_memory_usage = memory_get_usage();
+$memory_usage_limit	  = $initial_memory_usage + $write_buffer_size;
 $interval = microtime(true) - $timer;
 echo "All token processes have now finished, $interval seconds elapsed, starting to transfer data... \n";
 echo "Oldreads: $oldreads \n";
 echo "Latent oldreads: $latent_oldreads \n";
+
+
+try
+{
+	# remove the temporary table
+	#$connection->exec("DROP TABLE PMBdatatemp$index_suffix");	
+}
+catch ( PDOException $e ) 
+{
+	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
+}
+
+
 try
 {
 	$transfer_time_start = microtime(true);
@@ -649,10 +679,11 @@ try
 		$insert_counter = 0;
 		while ( $row = $temppdo->fetch(PDO::FETCH_ASSOC) )
 		{
-			if ( $w >= $write_buffer_len ) 
+			if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit ) 
 			{
 				$ins_sql[0] = " ";
 				$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, doc_matches, ID, doc_ids ) VALUES $ins_sql");
+				unset($ins_sql);
 				$ins_sql = "";
 				$w = 0;
 				++$insert_counter;
@@ -676,10 +707,11 @@ try
 		$temppdo->closeCursor();
 		
 		# rest of the values
-		if ( !empty($escape) ) 
+		if ( !empty($ins_sql) ) 
 		{
 			$ins_sql[0] = " ";
 			$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, doc_matches, ID, doc_ids ) VALUES $ins_sql");
+			unset($ins_sql);
 			$ins_sql = "";
 			$insert_counter = 0;
 		}
@@ -687,6 +719,7 @@ try
 		$connection->commit();
 		$connection->query("DROP TABLE IF EXISTS PMBtemporary".$index_suffix."_$i");
 	}
+	
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
 
@@ -709,16 +742,6 @@ catch ( PDOException $e )
 	echo $e->getMessage();
 }
 
-try
-{
-	# remove the temporary table
-	$connection->exec("DROP TABLE PMBdatatemp$index_suffix");	
-}
-catch ( PDOException $e ) 
-{
-	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
-}
-
 $tokens_end = microtime(true) - $tokens_start;
 
 echo "Inserting tokens into temp tables took $token_insert_time seconds \n";
@@ -728,9 +751,6 @@ if ( !$clean_slate ) echo "Switching tables took $drop_end seconds \n";
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
 echo "------------------------------------------------\nCompressing token data took $tokens_end seconds \n------------------------------------------------\n\nWaiting for prefixes...";
-
-
-
 
 
 

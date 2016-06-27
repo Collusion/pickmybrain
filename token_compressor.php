@@ -138,16 +138,10 @@ try
 	$insert_counter =    0;
 	$w = 0;
 	$insert_sql = "";
-	$insert_escape = array();
 	
 	$min_checksum = 0;
 	$min_tok_id = 0;
 	$min_doc_id = 0;
-	$min_tok_2_id = 0;
-	
-	$doc_ids 	= array();
-	$countarray = array();
-	$sentiscore = array();
 
 	$token_insert_time = 0;
 	$statistic_total_time = 0;
@@ -166,6 +160,11 @@ try
 		$senti_sql_index_column = ",sentiscore";
 	}
 	
+	# get initial memory usage
+	$write_buffer_size	  = 20*1024*1024;
+	$initial_memory_usage = memory_get_usage();
+	$memory_usage_limit	  = $initial_memory_usage + $write_buffer_size;
+	
 	$subpdo = $unbuffered_connection->query("SELECT 
 											PMBdatatemp".$index_suffix.".checksum, 
 											D.ID as token_id,
@@ -182,6 +181,14 @@ try
 	
 	$counter = 0;
 	$last_row = false;
+	
+	$document_hit_count		= 0;
+	$document_senti_score 	= 0;
+	$document_count			= 0;
+	$m_delta 				= 1; # for deltaencoding
+	$doc_id_string 			= "";
+	$token_data_string 		= "";
+	$last_string			= false;
 	
 	if ( $process_number === 0 ) 
 	{
@@ -206,20 +213,80 @@ try
 		{
 			$last_row = true;
 		}
-
-		# token_id changes now ! 
-		if ( ($min_checksum > $start_checksum && $token_id !== $min_tok_id) || $last_row ) 
+		
+		# document has changed => compress old data
+		if ( ($min_checksum > $start_checksum && ($doc_id !== $min_doc_id || $token_id !== $min_tok_id)) || $last_row ) 
 		{
-			ksort($doc_ids);
-			# document ids should be in ascending order
-			$m_delta = 1;
-			$doc_id_string = "";
-			$token_data_string = "";
-			$last_string = false;
-			
-			foreach ( $doc_ids as $d_id => $data_value )
+			++$document_count;
+			/* DeltaVBencode the document id here */
+			$tmp = $min_doc_id-$m_delta+1;
+			do
 			{
-				$tmp = $d_id-$m_delta+1;
+				$lowest7bits = $tmp & 127;
+				$tmp >>= 7;
+					
+				if ( $tmp ) 
+				{
+					$doc_id_string .= $hex_lookup_encode[$lowest7bits];
+				}
+				else
+				{
+					$doc_id_string .= $hex_lookup_encode[(128 | $lowest7bits)];
+				}
+			}
+			while ( $tmp ) ;
+			$m_delta = $min_doc_id;
+			
+			/* */
+			if ( $sentiment_analysis )
+			{
+				if ( $document_senti_score < -128 ) 
+				{
+					$document_senti_score = -128;
+				}
+				else if ( $document_senti_score > 127 )
+				{
+					$document_senti_score = 127;
+				}
+		
+				# combine the count of tokens and sentiment score into one number
+				$integer = ($document_hit_count << 8) | ($document_senti_score+128);
+			}
+			else
+			{
+				$integer = $document_hit_count;
+			}
+			
+			/* VBencode the document hit count here */
+			$temp_string = "";
+			do
+			{
+				# get 7 LSB bits
+				$lowest7bits = $integer & 127;
+				
+				# shift original number >> 7 
+				$integer = $integer >> 7;
+				
+				if ( $integer ) 
+				{
+					# number is yet to end, prepend 0 ( or actually do nothing :)
+					$temp_string .= $hex_lookup_encode[$lowest7bits];
+				}
+				else
+				{
+					# number ends here, prepend 1
+					$temp_string .= $hex_lookup_encode[(128 | $lowest7bits)];
+				}
+			}
+			while ( $integer ) ;
+
+			/* DeltaVBencode token/document match data here */
+			asort($token_match_data);	
+			$delta = 1;
+			foreach ( $token_match_data as $datavalue )
+			{
+				$tmp = $datavalue-$delta+1;
+				
 				do
 				{
 					$lowest7bits = $tmp & 127;
@@ -227,123 +294,64 @@ try
 					
 					if ( $tmp ) 
 					{
-						$doc_id_string .= $hex_lookup_encode[$lowest7bits];
-					}
-					else
-					{
-						$doc_id_string .= $hex_lookup_encode[(128 | $lowest7bits)];
-					}
-				}
-				while ( $tmp ) ;
-				$m_delta = $d_id;
-				
-				if ( $sentiment_analysis )
-				{
-					if ( $sentiscore[$d_id] < -128 ) 
-					{
-						$sentiscore[$d_id] = -128;
-					}
-					else if ( $sentiscore[$d_id] > 127 )
-					{
-						$sentiscore[$d_id] = 127;
-					}
-			
-					# combine the count of tokens and sentiment score into one number
-					$integer = ($countarray[$d_id] << 8) | ($sentiscore[$d_id]+128);
-				}
-				else
-				{
-					$integer = $countarray[$d_id];
-				}
-				
-				# then vbencode the value here
-				$temp_string = "";
-				do
-				{
-					# get 7 LSB bits
-					$lowest7bits = $integer & 127;
-					
-					# shift original number >> 7 
-					$integer = $integer >> 7;
-					
-					if ( $integer ) 
-					{
-						# number is yet to end, prepend 0 ( or actually do nothing :)
 						$temp_string .= $hex_lookup_encode[$lowest7bits];
 					}
 					else
 					{
-						# number ends here, prepend 1
 						$temp_string .= $hex_lookup_encode[(128 | $lowest7bits)];
 					}
 				}
-				while ( $integer ) ;
-
-				# sort values for delta encoding
-				asort($doc_ids[$d_id]);	
-				$delta = 1;
-				
-				foreach ( $doc_ids[$d_id] as $datavalue )
-				{
-					$tmp = $datavalue-$delta+1;
-					
-					do
-					{
-						$lowest7bits = $tmp & 127;
-						$tmp >>= 7;
-						
-						if ( $tmp ) 
-						{
-							$temp_string .= $hex_lookup_encode[$lowest7bits];
-						}
-						else
-						{
-							$temp_string .= $hex_lookup_encode[(128 | $lowest7bits)];
-						}
-					}
-					while ( $tmp ) ;
-			
-					$delta = $datavalue;
-				}
-				
-				if ( $temp_string === $last_string ) 
-				{
-					# no need to store this string :)
-					$temp_string = "";
-				}
-				else
-				{
-					$last_string = $temp_string;
-				}
-				
-				$token_data_string .= $bin_separator . $temp_string;
+				while ( $tmp ) ;
+		
+				$delta = $datavalue;
 			}
+			
+			if ( $temp_string === $last_string ) 
+			{
+				# no need to store this string :)
+				$temp_string = "";
+			}
+			else
+			{
+				$last_string = $temp_string;
+			}
+			
+			$token_data_string .= $bin_separator . $temp_string;
+			
+			# reset variables
+			unset($temp_string, $token_match_data);
+			$document_hit_count 	= 0;
+			$document_senti_score 	= 0;
+			$token_match_data 		= array();
+		}
 
-			$insert_sql .= ",($min_checksum,".$connection->quote($min_token).",".count($doc_ids).",$min_tok_id,".$connection->quote($doc_id_string . $token_data_string).")";
-			#$insert_escape[] = $min_checksum;							# crc32 of token
-			#$insert_escape[] = $min_tok_id;								# 16bit checksum of token
-			#$insert_escape[] = count($doc_ids);							# mathing document count
-			#$insert_escape[] = $doc_id_string . $token_data_string; 	# binary data
+		# token_id changes now ! 
+		if ( ($min_checksum > $start_checksum && $token_id !== $min_tok_id) || $last_row ) 
+		{
+			$insert_sql .= ",($min_checksum,".$connection->quote($min_token).",$document_count,$min_tok_id,".$connection->quote($doc_id_string . $token_data_string).")";
 			++$x;
 			++$w;
 			
-			# free some memory
+			# reset temporary variables
 			unset($doc_id_string, $token_data_string, $temp_string);
-
-			if ( $w >= $write_buffer_len )
+			$m_delta 			= 1;
+			$document_count		= 0;
+			$doc_id_string 		= "";
+			$token_data_string 	= "";
+			$last_string		= false;
+			
+			if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit )
 			{
 				$token_insert_time_start = microtime(true);
 				$insert_sql[0] = " ";
 				$ins = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES $insert_sql");
-				#$ins->execute($insert_escape);
 				$token_insert_time += (microtime(true)-$token_insert_time_start);
 				$w = 0;
 				++$insert_counter;
 				
 				# reset write buffer
-				unset($insert_sql, $insert_escape);
+				unset($insert_sql);
 				$insert_sql = "";
-				$insert_escape = array();
 				
 				if ( $process_number === 0 && $insert_counter >= $flush_interval ) 
 				{
@@ -352,23 +360,14 @@ try
 					$insert_counter = 0;
 				}
 			}
-
-			# reset temporary variables
-			unset($doc_ids, $countarray, $sentiscore);
-			$doc_ids 	= array();
-			$countarray = array();
-			$sentiscore = array();
 		}
-
-		if ( empty($doc_ids[$doc_id]) ) $doc_ids[$doc_id] = array();
-		if ( empty($countarray[$doc_id]) ) $countarray[$doc_id] = 0;		
-		$doc_ids[$doc_id][] = $combined;
-		$countarray[$doc_id] += (int)$row["count"];
 		
+		$token_match_data[] = $combined;
+		$document_hit_count += +$row["count"];
+
 		if ( $sentiment_analysis ) 
 		{
-			if ( empty($sentiscore[$doc_id]) ) $sentiscore[$doc_id] = 0;
-			$sentiscore[$doc_id] += (int)$row["sentiscore"];
+			$document_senti_score += +$row["sentiscore"];
 		}
 		
 		# gather and write data
@@ -417,11 +416,9 @@ try
 		$token_insert_time += (microtime(true)-$token_insert_time_start);
 		
 		# reset write buffer
-		unset($insert_sql, $insert_escape);
+		unset($insert_sql);
 		$insert_counter = 0;
-	}
-	
-	
+	}	
 }
 catch ( PDOException $e ) 
 {
@@ -448,11 +445,24 @@ if ( isset($subpdo) )
 	unset($subpdo);
 }
 
+unset($row, $oldrow);
+
 # wait for another processes to finish
 require("process_listener.php");
 
 $interval = microtime(true) - $timer;
 echo "All token processes have now finished, $interval seconds elapsed, starting to transfer data... \n";
+
+try
+{
+	# remove the temporary table
+	#$connection->exec("DROP TABLE PMBdatatemp$index_suffix");	
+}
+catch ( PDOException $e ) 
+{
+	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
+}
+
 
 try
 {
@@ -467,10 +477,11 @@ try
 		$insert_counter = 0;
 		while ( $row = $temppdo->fetch(PDO::FETCH_ASSOC) )
 		{
-			if ( $w >= $write_buffer_len ) 
+			if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit ) 
 			{
 				$ins_sql[0] = " ";
 				$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES $ins_sql");
+				unset($ins_sql);
 				$ins_sql = "";
 				$w = 0;
 				++$insert_counter;
@@ -482,22 +493,19 @@ try
 					$insert_counter = 0;
 				}
 			}
-	
+
 			$ins_sql .= ",(".$row["checksum"].",".$connection->quote($row["token"]).",".$row["doc_matches"].",".$row["ID"].",".$connection->quote($row["doc_ids"]).")";
-			#$escape[] = $row["checksum"];
-			#$escape[] = $row["minichecksum"];
-			#$escape[] = $row["doc_matches"];
-			#$escape[] = $row["doc_ids"];
 			++$w;	
 		}
 		
 		$temppdo->closeCursor();
 		
 		# rest of the values
-		if ( !empty($escape) ) 
+		if ( !empty($ins_sql) ) 
 		{
 			$ins_sql[0] = " ";
-			$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, doc_ids, ID) VALUES $ins_sql");
+			$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, ID, doc_ids) VALUES $ins_sql");
+			unset($ins_sql);
 			$ins_sql = "";
 			$insert_counter = 0;
 		}
@@ -525,16 +533,6 @@ catch ( PDOException $e )
 {
 	echo "Error during tranferring data from myisam to innodb \n ";
 	echo $e->getMessage();
-}
-
-try
-{
-	# remove the temporary table
-	$connection->exec("DROP TABLE PMBdatatemp$index_suffix");	
-}
-catch ( PDOException $e ) 
-{
-	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
 }
 
 $tokens_end = microtime(true) - $tokens_start;

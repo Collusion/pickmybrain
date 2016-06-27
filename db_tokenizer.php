@@ -29,7 +29,10 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 }
 
-register_shutdown_function("shutdown", $index_id, $process_number);
+if ( $process_number !== 0 ) 
+{
+	register_shutdown_function("shutdown", $index_id, $process_number);
+}
 
 define("CHARSET_REGEXP", "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "]/u");
 							
@@ -261,16 +264,16 @@ try
 									ALTER TABLE PMBTokens$index_suffix ENGINE=INNODB $innodb_row_format_sql;
 									ALTER TABLE PMBPrefixes$index_suffix ENGINE=INNODB $innodb_row_format_sql");
 				
-				# create new temporary tables		   
+				# create new temporary tables	  KEY checksum (checksum,minichecksum,ID)	   
 				$connection->exec("DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
 									CREATE TABLE IF NOT EXISTS PMBtoktemp$index_suffix (
 									 token varbinary(40) NOT NULL,
 									 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
 									 checksum int(10) unsigned NOT NULL,
 									 minichecksum smallint(5) unsigned NOT NULL,
-									 PRIMARY KEY (token),
-									 KEY ID (ID),
-									 KEY checksum (checksum,minichecksum,ID)
+									 PRIMARY KEY (checksum,minichecksum),
+									 KEY ID (ID)
+									
 									) ENGINE=MYISAM DEFAULT CHARSET=utf8 $data_dir_sql");
 			}
 
@@ -447,6 +450,8 @@ $insert_data_sql = "";
 $up = 0;
 $documents = 0;
 $temp_documents = 0;
+$insert_counter = 0;
+$flush_interval = 10;
 
 # start by disabling autocommit
 # flush write log to disk at every write buffer commit
@@ -848,9 +853,16 @@ while ( $row = $mainpdo->fetch(PDO::FETCH_ASSOC) )
 		
 			$docinfo_time_start = microtime(true);
 			$count = count($docinfo_value_sets);
-			$docpdo = $connection->query("INSERT INTO PMBDocinfo$index_suffix $docinfo_columns VALUES " . implode(",", $cescape) . "");												
-			#$docpdo->execute($cescape);
+			$docpdo = $connection->query("INSERT INTO PMBDocinfo$index_suffix $docinfo_columns VALUES " . implode(",", $cescape) . "");	
+			++$insert_counter;		
 			
+			if ( $insert_counter >= $flush_interval )
+			{
+				$connection->commit();
+				$connection->beginTransaction();
+				$insert_counter = 0;
+			}
+
 			$log .= "docinfo ok \n";
 			$loop_log .= "docinfo ok \n";
 				
@@ -887,8 +899,7 @@ while ( $row = $mainpdo->fetch(PDO::FETCH_ASSOC) )
 			$loop_log .= "new word occurances ok \n";
 			
 			$awaiting_writes = 0;
-			
-				
+
 			try
 			{
 				# check indexing permission
@@ -946,14 +957,12 @@ try
 			}
 			$tempsql[0] = " ";
 			$tokpdo = $connection->query("INSERT IGNORE INTO PMBtoktemp$index_suffix (token, checksum, minichecksum) VALUES $tempsql");
-			#$tokpdo->execute(array_keys($temporary_token_ids));
 			unset($temporary_token_ids);
 		}
 	
 		$docinfo_time_start = microtime(true);
 		$count = count($docinfo_value_sets);
 		$docpdo = $connection->query("INSERT INTO PMBDocinfo$index_suffix $docinfo_columns VALUES " . implode(",", $cescape) . "");												
-		#$docpdo->execute($cescape);
 		
 		$log .= "docinfo ok \n";
 		$loop_log .= "docinfo ok \n";
