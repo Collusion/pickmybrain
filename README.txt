@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   0.84 BETA 
-Published: 21.06.2016
+Version:   0.90 BETA 
+Published: 17.07.2016
 
 copyright 2015-2016 Henri Ruutinen 
 
@@ -119,10 +119,12 @@ OR
 
 2. From the command line: php /path/to/indexer.php index_id=myindexid 
 
-extra parameters:
+extra parameters (optional):
 	usermode ( ignores indexing intervals )
 	OR 
 	testmode ( checks index configuration for errors )
+	
+	purge	 ( removes all existing indexed data from current index )
 
 OR
 
@@ -185,8 +187,10 @@ autoload_settings.php		Loads and parses .txt configuration files
 clisetup.php			command-line control panel
 clisearch.php			command-line search utility
 control.php             	the web control panel
+data_partitioner.php		tells processes which part of the data to read when external linux sort is in use
 db_connection.php		this file defines how PHP is supposed to connect to your database
-db_tokenizer.php		database indexer		
+db_tokenizer.php		database indexer
+db_tokenizer_ext.php		same as above, but uses external linux sort		
 ext_db_connection.php		(optional) this file defines an external read-only database for database indexes
 indexer.php			to launch an indexing process, call this file with correct params
 input_value_processor.php	processes parameters for indexer, db_tokenizer and web_tokenizer
@@ -199,7 +203,9 @@ prefix_compressor.php		fetches temp prefix data, compresses it and inserts again
 process_listener.php		if multiprocessing is enabled, this file waits for all processes to finish
 settings.php			contains default values for every new index
 token_compressor.php		fetches temp token position data, compresses it and inserts again into db
+token_compressor_ext.php	same as above, but uses external linux sort
 token_compressor_merger.php	same as previous + supports index merging
+token_compressor_merger_ext.php	same as above, but uses external linux sort
 tokenizer_functions.php		Helper functions for control panel / indexer
 web_tokenizer.php		web crawler / indexer
 
@@ -215,9 +221,8 @@ CREATE TABLE IF NOT EXISTS PMBTokens_X (
  checksum int(10) unsigned NOT NULL,
  token varbinary(40) NOT NULL,
  doc_matches int(8) unsigned NOT NULL,
- ID mediumint(10) unsigned NOT NULL,
  doc_ids mediumblob NOT NULL,
- PRIMARY KEY (checksum, token, doc_matches, ID)
+ PRIMARY KEY (checksum, token)
 ) ENGINE=InnoDB 
 
 (The _X postfix indicates the index identification number)
@@ -227,7 +232,6 @@ they match and the actual token match data
 checksum 	= CRC32(token)
 token		= the token
 doc_matches	= in how many documents is this token present
-ID		= unique ID for this token
 doc_ids		= document match/position data in binary
 
 
@@ -238,18 +242,19 @@ doc_id_1, doc_id_2, doc_id_3 ... doc_id_n DELIMITER(1)
 
 ^ (After document ids end, the first DELIMITER occurs)
 
-doc_id_1_count pair_data_1 pair_data_2 DELIMITER(2) doc_id_2_count pair_data_1 pair_data_2 DELIMITER(3) ...
+(doc_id_1_sentiscore) field_data1 field_data2 field_data3 DELIMITER(2) (doc_id_1_sentiscore) field_data1 field_data2 DELIMITER(3) ...
 
 ^ token match data for doc_id_1 is present between the first DELIMITER and the second DELIMITER
 ^ token match data is stored this way for every doc_id_2 ... doc_id_n and separated by DELIMITERS
 
 TERM EXPLANATIONS ( all values are unsigned integers )
-doc_id_x        matching document id 
-DELIMITER	delimiter, 0 (zero) 
-doc_id_x_count	how many matches of current token in this document (SENTIMENT INDEXES: (count<<8) | sentiscore ) 
-pair_data_x	( next_token_id << field_bits ) 
-next_token_id	unique ID of the immediately following token, zero if current token is last of the field
-field_bits	in which fields this token pair is present, number of field bits = number of indexable columns
+doc_id_x        	matching document id 
+DELIMITER		delimiter, 0 (zero) 
+(doc_id_x_sentiscore) 	optional sentiment score for this token and document 
+field_datax		( (field position << field_bits) | field_id ) 
+field_position		position of the token from the beginning of current field ( 1, 2, 3 ... )
+field_bits		how many bits are required for storing an arbitrary field_id ( constant value ) 
+field_id		which indexed field this token matches to ( 0, 1, 2 ... )  
 
 For decoding the data:
 1. run variable byte decode on the whole binary string
