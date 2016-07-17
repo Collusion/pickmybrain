@@ -85,6 +85,18 @@ To install Pickmybrain, please unzip the contents and place them into
 a new folder. 
 
 
+Upgrading from previous versions
+--------------------------------
+
+Unzip the new files and simply overwrite the old ones. Please delete 
+deprecated configuration files ( settings_x.php ) as they have 
+been replaced with more approachable .txt files ( settings_x.txt ).
+ 
+NOTICE: If you updated to version 0.90 BETA from a previous version,
+you need to truncate old indexes since the compressed data format
+is now different.
+
+
 How to configure
 ----------------
 
@@ -164,13 +176,6 @@ panel and it allows you to search pre-configured indexes. Open the
 index you want to search and press the 'Search' button or alternatively 
 Ctrl+Q from your keyboard.
 
-
-Upgrading from previous versions
---------------------------------
-
-Unzip the new files and simply overwrite the old ones. Please delete 
-deprecated configuration files ( settings_x.php ) as they have 
-been replaced with more approachable .txt files ( settings_x.txt ). 
 
 Bugs
 ----
