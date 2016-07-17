@@ -9,7 +9,7 @@
  * or visit: http://www.pickmybra.in
  */
 
-ini_set('memory_limit', '3072M');
+ini_set('memory_limit', '1024M');
 
 # check input parameters only if process number is not defined at all
 # ==> this file is launched as a separate process
@@ -299,7 +299,7 @@ try
 					
 			if ( !$permission )
 			{
-				$pdo->closeCursor();
+				if ( isset($pdo) ) $pdo->closeCursor();
 				$connection->query("UPDATE PMBIndexes SET current_state = 0 WHERE ID = $index_id");
 				if ( $process_number > 0 ) 
 				{

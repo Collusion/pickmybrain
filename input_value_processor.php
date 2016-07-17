@@ -19,6 +19,8 @@ ini_set('memory_limit', '1024M');
 $supported_commands = array("index_id" 			=> 1,
 							"testmode" 			=> 1,
 							"usermode" 			=> 1,
+							"purge" 			=> 1,
+							"data_partition" 	=> 1,
 							"process_number" 	=> 1,
 							"rebuildprefixes" 	=> 1,
 							"2>&1" 				=> 1);
@@ -61,6 +63,12 @@ if ( !empty($_GET) )
 	{
 		$process_number = (int)$_GET["process_number"];
 	}
+	
+	# launch multiple processes ?
+	if ( !empty($_GET["data_partition"]) )
+	{
+		$data_partition = explode("-", trim($_GET["data_partitions"]));
+	}
 }
 # script launched by command line / exec()
 else if ( !empty($argv) )
@@ -97,6 +105,13 @@ else if ( !empty($argv) )
 					$process_number = (int)$value;
 				}
 				break;
+				
+				case 'data_partition':
+				if ( !empty($value) )
+				{
+					$data_partition = explode("-", trim($value));
+				}
+				break;
 			}
 		}
 		else
@@ -111,6 +126,10 @@ else if ( !empty($argv) )
 						
 					case 'usermode':
 					$user_mode = true;
+					break;
+					
+					case 'purge';
+					$purge_index = true;
 					break;
 						
 					# rebuild prefixes and quit

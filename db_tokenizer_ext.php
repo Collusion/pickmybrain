@@ -19,7 +19,7 @@ if ( !isset($process_number) )
 	error_reporting(E_ALL);
 	mb_internal_encoding("UTF-8");
 	set_time_limit(0);
-	#ignore_user_abort(true);
+	ignore_user_abort(true);
 	
 	$log = "";
 	$test_mode 		= false;
@@ -222,20 +222,9 @@ try
 	}
 	
 	$connection->exec("ALTER TABLE PMBDocinfo$index_suffix DISABLE KEYS;");
-	
-	$senti_sql_column = "";
-	$senti_sql_index_column = "";
-	
-	if ( $sentiment_analysis )
-	{
-		$senti_sql_column = "sentiscore tinyint(3) NOT NULL,";
-		$senti_sql_index_column = ",sentiscore";
-	}
-	
+
 	# for measuring time
 	$docinfo_extra_time = 0;
-	
-	$bitshift = requiredBits($number_of_fields);
 	
 	# do not run diagnostics & formatting unless we are in master process
 	if ( $process_number === 0 ) 
@@ -250,32 +239,13 @@ try
 			}
 			
 			$temporary_table_type = "ENGINE=MYISAM DEFAULT CHARSET=utf8 ROW_FORMAT=FIXED $data_dir_sql";
-
-			$connection->exec("DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
-								CREATE TABLE IF NOT EXISTS PMBdatatemp$index_suffix (
-								checksum int(10) unsigned NOT NULL,
-								minichecksum smallint(7) unsigned NOT NULL,
-								doc_id int(10) unsigned NOT NULL,
-								field_pos int(10) unsigned NOT NULL,
-								".$senti_sql_column."
-							 	KEY (checksum,minichecksum,doc_id,field_pos".$senti_sql_index_column.")
-								) $temporary_table_type PACK_KEYS=1");
-												
-			# create new temporary tables				   
-			$connection->exec("DROP TABLE IF EXISTS PMBpretemp$index_suffix;
-								CREATE TABLE IF NOT EXISTS PMBpretemp$index_suffix (
-								checksum int(10) unsigned NOT NULL,
-								token_checksum int(10) unsigned NOT NULL,
-								cutlen tinyint(3) unsigned NOT NULL,
-								KEY (checksum, cutlen, token_checksum)
-								) $temporary_table_type PACK_KEYS=1");
 			
 			if ( $clean_slate || isset($purge_index) ) 
 			{				
 				$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
 									TRUNCATE TABLE PMBPrefixes$index_suffix;
-									ALTER TABLE PMBTokens$index_suffix ENGINE=INNODB $innodb_row_format_sql;
-									ALTER TABLE PMBPrefixes$index_suffix ENGINE=INNODB $innodb_row_format_sql");
+									ALTER TABLE PMBTokens$index_suffix ENGINE=INNODB $innodb_row_format_sql $data_dir_sql;
+									ALTER TABLE PMBPrefixes$index_suffix ENGINE=INNODB $innodb_row_format_sql $data_dir_sql");
 				
 				# create new temporary tables	  KEY checksum (checksum,minichecksum,ID)	   
 				$connection->exec("DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
@@ -290,10 +260,7 @@ try
 			{
 				echo "Loading index into cache... \n";
 				$connection->query("LOAD INDEX INTO CACHE PMBtoktemp$index_suffix;");	
-			}
-			
-			# disable non-unique keys 				 
-			$connection->exec("ALTER TABLE PMBdatatemp$index_suffix DISABLE KEYS;");							
+			}								
 		}
 							
 		$log .= "\n";
@@ -315,8 +282,7 @@ catch ( PDOException $e )
 {
 	echo "Something went wrong when creating temporary tables: \n";
 	echo $e->getMessage() . "\n";
-	SetIndexingState(0, $index_id);
-	die();
+	return;
 }
 
 /* 
@@ -460,7 +426,23 @@ catch ( PDOException $e )
 	return;
 }
 
-$insert_data_sql = "";
+if ( !empty($mysql_data_dir) )
+{
+	$directory = $mysql_data_dir; # custom directory
+}
+else
+{
+	$directory = realpath(dirname(__FILE__));
+}
+
+$filename = $directory . "/datatemp_".$index_id."_".$process_number.".txt";
+# create a new temporary file
+# remoe existing files
+@unlink($filename);
+$f = fopen($filename, "a");
+
+$insert_buffer = "";
+$bitshift = requiredBits($number_of_fields);
 $up = 0;
 $documents = 0;
 $temp_documents = 0;
@@ -470,10 +452,6 @@ $toktemp_total_insert = 0;
 
 try
 {
-# start by disabling autocommit
-# flush write log to disk at every write buffer commit
-#$connection->beginTransaction();
-
 $skipped = 0;
 $fetched = 0;
 $breakpoint = 0;
@@ -692,7 +670,7 @@ while ( true )
 		{
 			$fields[$f_id] = str_replace($ignore_chars, "", $fields[$f_id]);
 		}
-
+		
 		# mass-replace all non-defined dialect characters if necessary
 		if ( $dialect_processing && !empty($mass_find) ) 
 		{
@@ -718,9 +696,12 @@ while ( true )
 		if ( $separate_alnum ) 
 		{
 			$fields[$f_id] = preg_replace('/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/u', ' ', $fields[$f_id]);
-		}	
+		}
 	}
 
+	#$token_pairs = array();
+	$tokens = array();
+	
 	foreach ( $fields as $field_id => $field ) 
 	{
 		$pos = 1;
@@ -732,35 +713,26 @@ while ( true )
 			if ( isset($match) && $match !== '' )
 			{
 				$temporary_token_ids[$match] = 1;
+				if ( empty($tokens[$match]) ) $tokens[$match] = "";
 				
-				#if ( isset(
-				$crc32 = crc32($match);
-				$b = md5($match);
-				$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
-				$field_pos = ($pos << $bitshift) | $field_id;
-				
-				# sentiment score
-				$wordsentiscore = 0;
-				if ( !empty($word_sentiment_scores[$match]) )
-				{
-					$wordsentiscore = $word_sentiment_scores[$match];
-				}
-				
-				if ( $sentiment_analysis ) 
-				{
-					$insert_data_sql	.= ",($crc32, $tid, $document_id, $field_pos, $wordsentiscore)";
-				}
-				else
-				{
-					$insert_data_sql	.= ",($crc32, $tid, $document_id, $field_pos)";
-				}
-				
+				$tokens[$match] .= " ".dechex(($pos<<$bitshift)|$field_id);
 				++$pos;
 			}
 		}
 	}
 	
 	unset($expl);
+	
+	foreach ( $tokens as $token => $string ) 
+	{
+		$crc32 = crc32($token);
+		$b = md5($token);
+		$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+		
+		$insert_buffer .= sprintf("%12X %8X", ($crc32<<16)|$tid, $document_id)."$string\n";
+	}
+	
+	unset($tokens);
 	
 	try
 	{
@@ -819,14 +791,6 @@ while ( true )
 			$docpdo = $connection->query("INSERT INTO PMBDocinfo$index_suffix $docinfo_columns VALUES " . implode(",", $cescape) . "");	
 			++$insert_counter;		
 			
-			/*
-			if ( $insert_counter >= $flush_interval )
-			{
-				$connection->commit();
-				$connection->beginTransaction();
-				$insert_counter = 0;
-			}*/
-
 			$log .= "docinfo ok \n";
 			$loop_log .= "docinfo ok \n";
 				
@@ -846,16 +810,8 @@ while ( true )
 
 			$docinfo_extra_time += (microtime(true)-$docinfo_time_start);
 
-			$insert_data_sql[0] = " "; 
-			$datapdo = $connection->query("INSERT INTO PMBdatatemp$index_suffix (checksum,
-																				minichecksum, 
-																				doc_id, 
-																				field_pos
-																				".$senti_sql_index_column." 
-																				) VALUES $insert_data_sql");
-			unset($insert_data_sql);
-			$insert_data_sql = "";
-			$up = 0;
+			fwrite($f, $insert_buffer);
+			$insert_buffer = "";
 			
 			$log .= "new word occurances ok \n";
 			$loop_log .= "new word occurances ok \n";
@@ -897,7 +853,7 @@ while ( true )
 		{
 			echo $log;
 		}
-
+		
 		return;
 	}
 }
@@ -931,7 +887,7 @@ try
 		$toktemp_total_insert += microtime(true)-$ins_start;
 		unset($temporary_token_ids);
 	}
-	
+
 	# update token statistics
 	if ( $awaiting_writes ) 
 	{	
@@ -948,16 +904,8 @@ try
 
 		$docinfo_extra_time += (microtime(true)-$docinfo_time_start);
 
-		# insert token data
-		$insert_data_sql[0] = " "; 
-		$datapdo = $connection->query("INSERT INTO PMBdatatemp$index_suffix (checksum, 
-																				minichecksum, 
-																				doc_id, 
-																				field_pos 
-																				".$senti_sql_index_column." 
-																				) VALUES $insert_data_sql");
-		$insert_data_sql = "";
-		$up = 0;
+		fwrite($f, $insert_buffer);
+		$insert_buffer = "";
 
 		$log .= "new word occurances ok \n";
 		$loop_log .= "new word occurances ok \n";	
@@ -974,6 +922,9 @@ catch ( PDOException $e )
 {
 	echo "an error occurred during updating the remaining token rows \n" . $e->getMessage() . "\n";
 }
+
+# close temporary file pointer
+fclose($f);
 
 # mainpdo is not needed anymore
 if ( isset($mainpdo) )
@@ -1007,7 +958,52 @@ if ( $documents === 0 )
 }
 
 # create prefixes
-require_once("prefix_composer.php");
+
+if ( !empty($mysql_data_dir) )
+{
+	$sort_directory = $mysql_data_dir; # custom directory
+	$tmp_sort_dir = "--temporary-directory=$mysql_data_dir";
+}
+else
+{
+	$sort_directory = realpath(dirname(__FILE__));
+	$tmp_sort_dir = "";
+}
+
+for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
+{
+	$filepath = $sort_directory . "/pretemp_".$index_id."_".$i.".txt";
+	$filepath_sorted =  $sort_directory . "/pretemp_".$index_id."_sorted.txt";
+	@unlink($filepath); # remove existing file ( just to be sure ) 
+	@unlink($filepath_sorted); # remove existing file ( just to be sure ) 
+}
+
+require_once("prefix_composer_ext.php");
+
+$filepath_sorted =  $sort_directory . "/pretemp_".$index_id."_sorted.txt";
+$all_filepaths = "";
+
+# sort the external data files
+$sort_start = microtime(true);
+for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
+{
+	#echo "Sorting temporary prefix data for process_number $i \n";
+	$filepath = $sort_directory . "/pretemp_".$index_id."_".$i.".txt";
+	$all_filepaths .= $filepath . " ";
+}
+
+echo "Starting to sort prefix data \n";
+exec("LC_ALL=C sort $tmp_sort_dir -k1,1 $all_filepaths > $filepath_sorted");
+
+for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
+{
+	$filepath = $sort_directory . "/pretemp_".$index_id."_".$i.".txt";
+	@unlink($filepath); # remove the unsorted file
+}
+
+$sort_end = microtime(true)-$sort_start;
+echo "Sorting temporary prefix data took $sort_end seconds \n";
+
 
 $interval = microtime(true) - $timer;
 echo "\nNow all processes are completed\nDocinfo time: $docinfo_extra_time \n\n";
@@ -1023,12 +1019,6 @@ try
 						WHERE ID = $index_id");
 	
 	$key_start = microtime(true);
-	echo "Enabling keys for temporary tables...\n";
-	$connection->exec("ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;");
-	$key_end = microtime(true) - $key_start;					
-	echo "Enabling keys took: $key_end seconds \n";					
-	
-	$key_start = microtime(true);
 	echo "Enabling keys for PMBDocinfo table...\n";
 	$connection->exec("ALTER TABLE PMBDocinfo$index_suffix ENABLE KEYS;");
 	$key_end = microtime(true) - $key_start;	
@@ -1036,21 +1026,21 @@ try
 	
 	# precache table index
 	$connection->query("LOAD INDEX INTO CACHE PMBtoktemp$index_suffix;");
-	$connection->query("LOAD INDEX INTO CACHE PMBdatatemp$index_suffix;");
+
 						
 	# get count of token position data entries
-	$dcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBdatatemp$index_suffix");
-	$total_rows = $dcountpdo->fetchColumn();
+	#$dcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBdatatemp$index_suffix");
+	#$total_rows = $dcountpdo->fetchColumn();
 	
-	$pcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBpretemp$index_suffix");
-	$total_rows += $pcountpdo->fetchColumn();
+	#$pcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBpretemp$index_suffix");
+	#$total_rows += $pcountpdo->fetchColumn();
 	
 	#echo "dist_threads: $dist_threads - total rows: $total_rows \n";
 
 	# update indexing status accordingly ( + set the indexing permission ) 
 	$connection->query("UPDATE PMBIndexes SET current_state = 3, 
 						indexing_permission = 1, 
-						temp_loads = temp_loads + $total_rows, 
+						temp_loads = temp_loads + 0, 
 						temp_loads_left = 0 
 						WHERE ID = $index_id");
 
@@ -1065,24 +1055,53 @@ catch ( PDOException $e )
 $interval = microtime(true) - $timer;
 echo "----------------------------------------\nReading and tokenizing data took $interval seconds\n----------------------------------------------\n\nWaiting for tokens....\n";
 
-# run token compressor
-if ( $clean_slate )
+$all_filepaths = "";
+# open the process specific file
+if ( !empty($mysql_data_dir) )
 {
-	require_once("token_compressor.php");
+	$sort_directory = $mysql_data_dir; # custom directory
+	$tmp_sort_dir = "--temporary-directory=$mysql_data_dir";
 }
 else
 {
-	require_once("token_compressor_merger.php");
+	$sort_directory = realpath(dirname(__FILE__));
+	$tmp_sort_dir = "";
+}
+
+$filepath_sorted =  $sort_directory . "/datatemp_".$index_id."_sorted.txt";
+@unlink($filepath_sorted);
+		
+for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
+{
+	#echo "Sorting temporary prefix data for process_number $i \n";
+	$filepath = $sort_directory . "/datatemp_".$index_id."_".$i.".txt";
+	$all_filepaths .= $filepath . " ";
+}
+	
+# sort the external data files
+$sort_start = microtime(true);
+exec("LC_ALL=C sort $tmp_sort_dir -k1,1 -k2,2 $all_filepaths > $filepath_sorted");
+$sort_end = microtime(true)-$sort_start;
+echo "Sorting temporary match data took $sort_end seconds \n";
+
+# run token compressor
+if ( $clean_slate )
+{	
+	require_once("token_compressor_ext.php");
+}
+else
+{
+	require_once("token_compressor_merger_ext.php");
 }
 
 # run prefix compressor
 if ( $clean_slate )
 {
-	require_once("prefix_compressor.php");
+	require_once("prefix_compressor_ext.php");
 }
 else
 {
-	require_once("prefix_compressor_merger.php");
+	require_once("prefix_compressor_merger_ext.php");
 }
 
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";

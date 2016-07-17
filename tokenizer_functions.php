@@ -8,6 +8,39 @@
  * with this file. If not, please write to: henri.ruutinen@pickmybra.in
  * or visit: http://www.pickmybra.in
  */
+ 
+function isSortSupported()
+{
+	if ( !function_exists('exec') || exec('echo EXEC') != 'EXEC' )
+	{
+		return false;
+	}
+	else
+	{
+		$output = array();
+		exec('sort --version', $output);
+		$string = implode(" ", $output);
+		
+		if ( stripos($string, "written by") !== false || stripos($string, "GNU coreutils") !== false ) 
+		{
+			return true;
+		}
+	}
+	
+	# sort is not supported
+	return false;
+}
+
+function requiredBits($number_of_fields)
+{
+	--$number_of_fields;
+	if ( $number_of_fields <= 0 ) 
+	{
+		return 1;
+	}
+	
+	return (int)(log($number_of_fields,2)+1);
+}
 
 function str_to_array($string)
 {
@@ -264,8 +297,14 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 						break;
 					}
 				}
-				
-				if ( $data_count !== count($data_array) )
+
+				if ( $data_count === 0 ) 
+				{
+					$log .= "Warning: the provided SQL query is syntactically correct, but it does not return any rows. 
+					Therefore Pickmybrain is unable to make necessary adjustments.\n";
+					++$e_count;
+				}
+				else if ( $data_count !== count($data_array) )
 				{
 					$log .= "Error: the document ID column returns non-unique values.\n";
 					++$e_count;
@@ -1120,7 +1159,7 @@ function ini_array_value_export($setting_name, $data, $write_keys = false)
 	return $output;
 }
 
-function create_tables($index_id, $index_type, &$created_tables = array(), &$data_directory_warning = array(), &$general_database_errors = array(), $data_dir_sql = "", $row_compression = "")
+function create_tables($index_id, $index_type, &$created_tables = array(), &$data_directory_warning = "", &$general_database_errors = array(), $data_dir_sql = "", $row_compression = "")
 {
 	$errors = 0;
 	$index_suffix = "_" . $index_id;
@@ -1145,9 +1184,9 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 		 PRIMARY KEY (ID),
 		 KEY attr_category (attr_category),
 		 KEY url_checksum (url_checksum)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
+		) ENGINE=INNODB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
 	}
-	# other kind of index
+	# database index
 	else
 	{
 		$create_table["PMBDocinfo$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBDocinfo$index_suffix (
@@ -1155,16 +1194,15 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 		 avgsentiscore tinyint(4) NOT NULL,
 		 PRIMARY KEY (ID),
 		 KEY avgsentiscore (avgsentiscore)	
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
+		) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql";
 	}
 	
 	$create_table["PMBTokens$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBTokens$index_suffix (
 	 checksum int(10) unsigned NOT NULL,
 	 token varbinary(40) NOT NULL,
 	 doc_matches int(8) unsigned NOT NULL,
-	 ID mediumint(10) unsigned NOT NULL,
 	 doc_ids mediumblob NOT NULL,
-	 PRIMARY KEY (checksum, token, doc_matches, ID)
+	 PRIMARY KEY (checksum, token)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
 	
 	$create_table["PMBCategories$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBCategories$index_suffix (
@@ -1204,7 +1242,7 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 	{
 		$connection = db_connection();
 		$created_tables 			= array();
-		$data_directory_warning 	= false;
+		$data_directory_warning 	= "";
 		$general_database_errors 	= array();
 		$latest_sql = "";
 		$connection->beginTransaction();
@@ -1224,7 +1262,7 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 			}
 			catch( PDOException $e )
 			{
-				echo $e->getMessage() . "\n";
+				#echo $e->getMessage() . "\n";
 				if ( !empty($data_dir_sql) )
 				{
 					# maybe the failure is because because a custom data directory is set ! 
@@ -1350,6 +1388,67 @@ function VBDeltaDecode($hexstring, array $hex_lookup)
 	}
 		
 	return $result;
+}
+
+function MergeCompressedData($old_data, $new_data, array $hex_lookup, array $hex_lookup_encode ) 
+{
+	# step 1: find the max delta value from the old sttring
+	$delta = 1;
+	$len = strlen($old_data);
+	$temp = 0;
+	$shift = 0;
+	$max_val = 0;
+	
+	for ( $i = 0 ; $i < $len ; ++$i )
+	{
+		$bits = $hex_lookup[$old_data[$i]];
+		$temp |= (($bits & 127) << $shift*7);
+		++$shift;
+			
+		if ( $bits > 127 )
+		{
+			# 8th bit is set, number ends here ! 
+			$delta = $temp+$delta-1;
+			$max_val = $delta;
+			$temp = 0;
+			$shift = 0;
+		}
+	}
+
+	# reset variables for decoding
+	$delta = 1;
+	$first_value_len = 0;
+	
+	# step 2: find the first value of the new_docids string and replace it with a proper delta value
+	for ( $i = 0 ; $i < 12 ; ++$i )
+	{
+		$bits = $hex_lookup[$new_data[$i]];
+		$temp |= (($bits & 127) << $shift*7);
+		++$shift;
+			
+		if ( $bits > 127 )
+		{
+			# 8th bit is set, number ends here ! 
+			$delta = $temp+$delta-1;
+			$first_value = $delta; 
+			$temp = 0;
+			$shift = 0;
+			$first_value_pos = $i+1;
+			$i = 12; # we got what we wanted, end now
+		}
+	}
+	
+	# re-encode the first value
+	if ( $max_val >= $first_value ) 
+	{
+		echo "Values to be merged have to be in ascending order!\n";
+		return false;
+	}
+	
+	# new delta 
+	$first_new_value = VBencode(array($first_value-$max_val+1), $hex_lookup_encode);
+	
+	return $old_data . $first_new_value . substr($new_data, $first_value_pos);
 }
 
 # finds out maximum integer value of variable byte length and delta encoded array

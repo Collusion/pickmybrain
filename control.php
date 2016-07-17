@@ -308,7 +308,7 @@ try
 	 PRIMARY KEY (ID,type,documents,current_state,updated,indexing_permission),
 	 UNIQUE KEY name (name),
 	 UNIQUE KEY ID (ID)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+	) ENGINE=MYISAM DEFAULT CHARSET=utf8";
 	
 	try
 	{		
@@ -436,10 +436,10 @@ if ( !empty($_POST["action"]) && $_POST["action"] === "updatesettings" )
 {
 	# settings are to be UPDATED
 	$outcome = write_settings($_POST, $index_id);
-	
+
 	if ( $outcome ) 
 	{
-		# manually redirect user
+		#manually redirect user
 		header("Location: control.php?index_id=$index_id");
 		return;
 	}
@@ -763,7 +763,7 @@ $data_dir_sql = "";
 # sql for table creation
 if ( !empty($mysql_data_dir) && $innodb_file_per_table )
 {
-	$data_dir_sql = "DATA DIRECTORY = '$mysql_data_dir'";
+	$data_dir_sql = "DATA DIRECTORY = '$mysql_data_dir' INDEX DIRECTORY = '$mysql_data_dir'";
 }
 
 /*
@@ -914,7 +914,7 @@ else
 echo "<div id='pmb-index-name' data-index-name='$index_name'></div>";
 
 $created_tables 			= array();
-$data_directory_warning 	= false;
+$data_directory_warning 	= "";
 $general_database_errors 	= array();
 
 # create database tables ( if not already created ) 
@@ -982,10 +982,11 @@ else if ( !empty($data_directory_warning) )
 	# reset the settings
 	$mysql_data_dir = "";
 	$settings_to_write["mysql_data_dir"] = "";
-	#write_settings($_POST);
+	#echo "<h2>Please resolve the error(s) above to start indexing your website.</h2>";
+	#return;
 }
 
-if ( !empty($_POST["action"]) && isset($_POST["mysql_data_dir"]) && $_POST["action"] === "modify_mysql_data_dir" ) 
+if ( !empty($_POST["action"]) && isset($_POST["mysql_data_dir"]) && $_POST["action"] === "modify_mysql_data_dir" && empty($data_directory_warning) ) 
 {
 	write_settings($settings_to_write, $index_id);
 	header("Location: control.php?index_id=$index_id");

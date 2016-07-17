@@ -26,10 +26,24 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 	require_once("db_connection.php");
 }
+	
+# open the process specific file
+if ( !empty($mysql_data_dir) )
+{
+	$directory = $mysql_data_dir; # custom directory
+}
+else
+{
+	$directory = realpath(dirname(__FILE__));
+}
+$filepath =  $directory . "/pretemp_".$index_id."_sorted.txt";
+$f = fopen($filepath, "r");
+
+require "data_partitioner.php";
 
 # launch sister processes here if multiprocessing is turned on! 
 if ( $dist_threads > 1 && $process_number === 0  ) 
-{	
+{
 	# launch sister-processes
 	for ( $x = 1 ; $x < $dist_threads ; ++$x ) 
 	{
@@ -37,15 +51,17 @@ if ( $dist_threads > 1 && $process_number === 0  )
 		if ( $enable_exec )
 		{
 			# launch via exec()	
-			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x");
+			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x data_partition=" . implode("-", $data_partitions[$x]));
 		}
 		else
 		{
 			# launch via async curl
-			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x";
+			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x"."&data_partition=" . implode("-", $data_partitions[$x]);
 			execWithCurl($url_to_exec);
 		}
 	}
+	
+	$data_partition = $data_partitions[0];
 }
 
 if ( $process_number !== 0 ) 
@@ -62,35 +78,9 @@ try
 	{
 		$connection = db_connection();
 	}
-	else
-	{
-		# precache index in the main process
-		$connection->query("LOAD INDEX INTO CACHE PMBpretemp$index_suffix;");
-	}
-	
-	$unbuffered_connection = db_connection(false);
-	
-	$max_id = pow(2, 32);
-	$scale = (int)($max_id / $dist_threads);
-	$start_checksum = $process_number * $scale;
 
-	$min_checksum = $start_checksum;
-	$max_checksum = $min_checksum + $scale;
-	
-	$where_sql = "WHERE checksum >= $min_checksum AND checksum < $max_checksum";
-	
-	if ( $process_number == $dist_threads-1 ) 
-	{
-		# last thread ( with biggest offset ) 
-		$max_checksum = $max_id;
-		$where_sql = "WHERE checksum >= $min_checksum AND checksum <= $max_checksum";
-	}
-	
-	if ( $dist_threads ===  1 ) 
-	{
-		$where_sql = "";
-	}
-		
+	$unbuffered_connection = db_connection(false);
+			
 	$combinations 			= array();
 	$temp_sql 				= "";
 	$escape					= array();
@@ -143,13 +133,6 @@ try
 	$flush_interval			= 40;
 	$insert_counter 		= 0;
 
-	$pdo = $unbuffered_connection->query("SELECT 
-								checksum,
-								(token_checksum << 6 | cutlen) as combined
-								FROM PMBpretemp$index_suffix
-								$where_sql
-								ORDER BY checksum");								
-											
 	$rowcounter = 0;
 	
 	if ( $process_number === 0 ) 
@@ -157,16 +140,25 @@ try
 		$connection->beginTransaction();
 	}
 	
-	while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) )
+	fseek($f, $data_partition[0]);
+	$maximum_checksum = (int)$data_partition[1];	
+	
+	$comb_count = 0;
+	$checksum_count = 0;
+	$valuecount = 0;
+	$min_checksum = 0;
+	
+	while ( ($line = fgets($f)) !== false )
 	{
 		++$rowcounter;
 		
-		$checksum 		= (int)$row["checksum"];
-		$combined		= (int)$row["combined"];
+		$p = explode(" ", trim($line));
+		$checksum = hexdec($p[0]);
 		
 		# different checksum ! 
-		if ( $min_checksum > $start_checksum && $checksum !== $min_checksum ) 
+		if ( $min_checksum && $checksum !== $min_checksum ) 
 		{
+			++$checksum_count;
 			# sort combinations
 			sort($combinations);
 
@@ -196,7 +188,7 @@ try
 				$delta = $integer;
 			}
 
-			$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
+			$temp_sql .= ",($min_checksum,".$connection->quote($bin_data).")";
 			++$s;
 
 			if ( $s >= $write_buffer_len ) 
@@ -222,13 +214,25 @@ try
 			
 			unset($combinations, $bin_data);
 			$combinations = array();
+
+			if ( $min_checksum >= $maximum_checksum ) 
+			{
+				# end the process when checksum changes
+				break;
+			}
 		}
-		
-		$combinations[] = $combined;
 
 		++$x;	
-		
 		$min_checksum 		= $checksum;
+		
+		foreach ( $p as $ind => $pdata ) 
+		{
+			if ( $ind > 0 ) 
+			{
+				$combinations[] = hexdec($pdata);
+				++$comb_count;
+			}
+		}
 		
 		if ( $rowcounter % 10000 === 0 ) 
 		{
@@ -240,8 +244,7 @@ try
 					
 			if ( !$permission )
 			{
-				$pdo->closeCursor();
-				$connection->query("UPDATE PMBIndexes SET current_state = 0 WHERE ID = $index_id");
+				#$connection->query("UPDATE PMBIndexes SET current_state = 0 WHERE ID = $index_id");
 				if ( $process_number > 0 ) 
 				{
 					SetProcessState($index_id, $process_number, 0);
@@ -262,19 +265,21 @@ try
 		}
 	}
 	
-	echo "$rowcounter rows fetched \n";
+	fclose($f);
+	
+	$tokens_end = microtime(true) - $tokens_start;
 	
 	# compress remaining data
 	if ( !empty($combinations) )
 	{
 		sort($combinations);
-				
+			
 		$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
-								
-		$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
+							
+		$temp_sql .= ",($min_checksum,".$connection->quote($bin_data).")";
 		++$s;
 	}
-				
+					
 	# after, try if there is still some data left
 	if ( !empty($temp_sql) )
 	{
@@ -289,7 +294,6 @@ try
 	{
 		$connection->commit();
 	}
-
 }
 catch ( PDOException $e ) 
 {
@@ -374,17 +378,20 @@ catch ( PDOException $e )
 	echo $e->getMessage();
 }
 
-try
-{
-	# remove the temporary table
-	$connection->exec("DROP TABLE PMBpretemp$index_suffix");	
-}
-catch ( PDOException $e ) 
-{
-	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
-}
 
 $tokens_end = microtime(true) - $tokens_start;
+
+# remove the temporary file
+if ( !empty($mysql_data_dir) )
+{
+	$directory = $mysql_data_dir; # custom directory
+}
+else
+{
+	$directory = realpath(dirname(__FILE__));
+}
+$filepath =  $directory . "/pretemp_".$index_id."_sorted.txt";
+@unlink($filepath);
 
 echo "Inserting tokens into temp tables took $token_insert_time seconds \n";
 echo "Updating statistics took $statistic_total_time seconds \n";

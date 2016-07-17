@@ -16,6 +16,9 @@ $process_number = 0;
 require_once("input_value_processor.php");
 require_once("tokenizer_functions.php");
 
+# check if sort is supported
+$enable_ext_sorting = isSortSupported();
+
 # web crawler
 if ( $index_type == 1 ) 
 {
@@ -24,7 +27,14 @@ if ( $index_type == 1 )
 # database index
 else if ( $index_type == 2 ) 
 {
-	require_once("db_tokenizer.php");
+	if ( $enable_exec && $enable_ext_sorting )
+	{
+		require_once("db_tokenizer_ext.php");
+	}
+	else
+	{
+		require_once("db_tokenizer.php");
+	}
 }
 else
 {

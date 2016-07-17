@@ -158,6 +158,13 @@ try
 		die("Unknown index id $index_id");
 	}
 	
+	if ( isset($purge_index) )
+	{
+		$clean_slate = true;
+		$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix;
+						   UPDATE PMBIndexes SET documents = 0 WHERE ID = $index_id;");
+	}
+	
 	# update current indexing state to true ( 1 ) 
 	SetIndexingState(1, $index_id);
 	
@@ -174,37 +181,32 @@ try
 
 	$senti_sql_column = "";
 	$senti_sql_index_column = "";
-	$senti_insert_sql_column = "";
 	if ( $sentiment_analysis )
 	{
 		$senti_sql_column = "sentiscore tinyint(3) NOT NULL,";
 		$senti_sql_index_column = ",sentiscore";
-		$senti_insert_sql_column = "sentiscore,";
 	}
 
 	$connection->exec("DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
-								CREATE TABLE IF NOT EXISTS PMBdatatemp$index_suffix (
-								checksum int(10) unsigned NOT NULL,
-								minichecksum smallint(7) unsigned NOT NULL,
-								doc_id int(10) unsigned NOT NULL,
-								count tinyint(3) unsigned NOT NULL,
-							 	field_id tinyint(3) unsigned NOT NULL,
-								".$senti_sql_column."
-								checksum_2 int(10) unsigned,
-								minichecksum_2 smallint(7) unsigned,
-							 	KEY (checksum,minichecksum,doc_id,checksum_2,minichecksum_2,field_id,count ".$senti_sql_index_column.")
-								) $temporary_table_type PACK_KEYS=1");
-								
+							CREATE TABLE IF NOT EXISTS PMBdatatemp$index_suffix (
+							checksum int(10) unsigned NOT NULL,
+							minichecksum smallint(7) unsigned NOT NULL,
+							doc_id int(10) unsigned NOT NULL,
+							field_pos int(10) unsigned,
+							".$senti_sql_column."
+							KEY (checksum,minichecksum,doc_id,field_pos".$senti_sql_index_column.")
+							) $temporary_table_type PACK_KEYS=1");
+											
 	# create new temporary tables				   
 	$connection->exec("DROP TABLE IF EXISTS PMBpretemp$index_suffix;
-						CREATE TABLE IF NOT EXISTS PMBpretemp$index_suffix (
-						checksum int(10) unsigned NOT NULL,
-						token_checksum int(10) unsigned NOT NULL,
-						cutlen tinyint(3) unsigned NOT NULL,
-						KEY (checksum, cutlen, token_checksum)
-						) $temporary_table_type PACK_KEYS=1");
+							CREATE TABLE IF NOT EXISTS PMBpretemp$index_suffix (
+							checksum int(10) unsigned NOT NULL,
+							token_checksum int(10) unsigned NOT NULL,
+							cutlen tinyint(3) unsigned NOT NULL,
+							KEY (checksum, cutlen, token_checksum)
+							) $temporary_table_type PACK_KEYS=1");
 			
-	if ( $clean_slate ) 
+	if ( $clean_slate || isset($purge_index) ) 
 	{				
 		$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
 							TRUNCATE TABLE PMBPrefixes$index_suffix;
@@ -215,18 +217,19 @@ try
 		$connection->exec("DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
 							CREATE TABLE IF NOT EXISTS PMBtoktemp$index_suffix (
 							token varbinary(40) NOT NULL,
-							ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
 							checksum int(10) unsigned NOT NULL,
 							minichecksum smallint(5) unsigned NOT NULL,
-							PRIMARY KEY (token),
-							KEY ID (ID),
-							KEY checksum (checksum,minichecksum,ID)
+							PRIMARY KEY (checksum,minichecksum)
 							) ENGINE=MYISAM DEFAULT CHARSET=utf8 $data_dir_sql");
 	}
+	else
+	{
+		echo "Loading index into cache... \n";
+		$connection->query("LOAD INDEX INTO CACHE PMBtoktemp$index_suffix;");	
+	}	
 
 	# disable non-unique keys					 
-	$connection->exec("ALTER TABLE PMBtoktemp$index_suffix DISABLE KEYS;
-					   ALTER TABLE PMBdatatemp$index_suffix DISABLE KEYS;");		
+	$connection->exec("ALTER TABLE PMBdatatemp$index_suffix DISABLE KEYS;");		
 						
 	echo "Temp tables created \n";					
 						
@@ -364,10 +367,12 @@ if ( empty($url_list) )
 	$log .= "URL list is empty, nothing to index. Please define seed urls to start.";
 }
 
+$bitshift = requiredBits($number_of_fields);
 $indexed_docs = 0;
 $token_stat_time = 0;
 $insert_data_sql = "";
-$up = 0;
+$insert_counter = 0;
+$flush_interval = 10;
 
 # start by disabling autocommit
 # flush write log to disk at every write buffer commit
@@ -1075,6 +1080,9 @@ while ( !empty($url_list[$lp]) )
 		# convert to lowercase
 		$fields[$f_id] = mb_strtolower($fields[$f_id]);
 		
+		# unwanted characters
+		$fields[$f_id] = str_replace($unwanted_characters_plain_text, " ", $fields[$f_id]);
+		
 		# remove ignore_chars
 		if ( !empty($ignore_chars) )
 		{
@@ -1107,66 +1115,50 @@ while ( !empty($url_list[$lp]) )
 		{
 			$fields[$f_id] = preg_replace('/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/u', ' ', $fields[$f_id]);
 		}
-
-		# unwanted characters
-		$fields[$f_id] = str_replace($unwanted_characters_plain_text, " ", $fields[$f_id]);
 	}
 
-	$token_pairs = array();
-	
+	$aw = $awaiting_writes;
+
 	foreach ( $fields as $field_id => $field ) 
 	{
+		$pos = 1;
 		$expl = explode(" ", $field);
-		$first_token = NULL;
 
 		# ota kiinni tapaukset jossa expl-array vaan yhden alkion pituinen
 		foreach ( $expl as $m_i => $match ) 
 		{
 			if ( isset($match) && $match !== '' )
 			{
-				# overlong token, cut 
-				if ( isset($match[MAX_TOKEN_LEN]) )
+				$temporary_token_ids[$match] = 1;
+				
+				#if ( isset(
+				$crc32 = crc32($match);
+				$b = md5($match);
+				$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+				$field_pos = ($pos << $bitshift) | $field_id;
+				
+				# sentiment score
+				$wordsentiscore = 0;
+				if ( !empty($word_sentiment_scores[$match]) )
 				{
-					$match = substr($match, 0, MAX_TOKEN_LEN);
+					$wordsentiscore = $word_sentiment_scores[$match];
 				}
 				
-				if ( isset($first_token) && $first_token !== '' )
+				if ( $sentiment_analysis ) 
 				{
-					if ( isset($token_pairs[$first_token][$match][0]) )
-					{
-						$token_pairs[$first_token][$match][0] += 1; 				# one new hit
-						$token_pairs[$first_token][$match][1] |= (1 << $field_id);	# add field id bit by or operation
-					}
-					else
-					{
-						# new value ( count , field_id bit ) 
-						$token_pairs[$first_token][$match] = array(1, 1 << $field_id);
-					}
+					$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $field_pos, $wordsentiscore)";
+				}
+				else
+				{
+					$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $field_pos)";
 				}
 				
-				$temporary_token_ids[$match] = true;
-				
-				$first_token = $match;
+				++$pos;
 			}
-		}
-		
-		if ( isset($first_token) && $first_token !== '' )
-		{
-			# lastly, create a pseudo-pair ( last token of current field ) 
-			if ( isset($token_pairs[$first_token][NULL][0]) )
-			{
-				$token_pairs[$first_token][NULL][0] += 1; 					# one new hit
-				$token_pairs[$first_token][NULL][1] |= (1 << $field_id);	# add field id bit by or operation
-			}
-			else
-			{
-				$token_pairs[$first_token][NULL] = array(1, 1 << $field_id);
-			}
-			
-			$temporary_token_ids[$first_token] = true;
 		}
 	}
-
+	
+	unset($expl);
 	
 	try
 	{	
@@ -1198,61 +1190,8 @@ while ( !empty($url_list[$lp]) )
 		$loop_log .= "docinfo ok \n";
 		$loop_log .= "prepdo ok \n";
 
-		$aw = $awaiting_writes;
-		
-		# update token stats and insert new occuranges
-		foreach ( $token_pairs as $token => $tokenlist )
-		{
-			# OLD TOKENS: treat these as updates
-			# update statistics ( doc_pointer and total_matches )
-			$real_token_count = 0;
-			
-			# calculate real count
-			foreach ( $tokenlist as $second_token => $token_data ) 
-			{
-				$real_token_count += $token_data[0];
-			}
-			
-			# sentiment score
-			$wordsentiscore = 0;
-			if ( !empty($word_sentiment_scores[$token]) )
-			{
-				$wordsentiscore = $word_sentiment_scores[$token];
-			}
-			
-			$crc32 = crc32($token);
-			$b = md5($token);
-			$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
-			
-			# generate a list of token pairs to insert for this doc_id
-			foreach ( $tokenlist as $second_token => $token_data ) 
-			{
-				if ( !isset($second_token) )
-				{
-					# no second token present
-					$second_token_checksum = "NULL"; 
-					$second_minichecksum   = "NULL"; 
-				}
-				else
-				{
-					$second_token_checksum = crc32($second_token);
-					$b = md5($second_token);
-					$second_minichecksum = hexdec($b[0].$b[1].$b[2].$b[3]);
-				}
-				
-				if ( $sentiment_analysis ) 
-				{
-					$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $real_token_count, $wordsentiscore, $second_token_checksum, $second_minichecksum," . $token_data[1] . ")";
-				}
-				else
-				{
-					$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $real_token_count, $second_token_checksum, $second_minichecksum," . $token_data[1] . ")";
-				}
-			}
-			
-			$temporary_ids[$aw] = true;
-		}
-		
+		$temporary_ids[$aw] = true;
+
 		# increase the awaiting_writes counter
 		++$awaiting_writes;
 
@@ -1318,18 +1257,15 @@ while ( !empty($url_list[$lp]) )
 			$datapdo = $connection->prepare("INSERT INTO PMBdatatemp$index_suffix (checksum,
 																				minichecksum, 
 																				doc_id, 
-																				count, 
-																				".$senti_insert_sql_column." 
-																				checksum_2,
-																				minichecksum_2, 
-																				field_id) VALUES $insert_data_sql");
+																				field_pos
+																				".$senti_sql_index_column." 
+																				) VALUES $insert_data_sql");
 			$datapdo->execute($insert_data_escape);
 			
 			$log .= "token data inserts OK  \n";
 			$loop_log .= "token data inserts OK  \n";
 			
 			$insert_data_sql = "";
-			$up = 0;
 			$awaiting_writes = 0;
 			
 			$log .= "new word occurances ok \n";
@@ -1339,8 +1275,14 @@ while ( !empty($url_list[$lp]) )
 			$cescape 			= array();
 			$insert_data_escape = array();
 			
-			$connection->commit();				# commit changes to disk and flush log
-			$connection->beginTransaction();	# start new transaction
+			++$insert_counter;		
+			# commit changes to disk and start a new transaction
+			if ( $insert_counter >= $flush_interval )
+			{
+				$connection->commit();
+				$connection->beginTransaction();
+				$insert_counter = 0;
+			}
 			
 			try
 			{
@@ -1386,22 +1328,22 @@ while ( !empty($url_list[$lp]) )
 
 try
 {
+	if ( !empty($temporary_token_ids) )
+	{
+		$tempsql = "";
+		foreach ( $temporary_token_ids as $token => $val ) 
+		{
+			$b = md5($token);
+			$minichecksum = hexdec($b[0].$b[1].$b[2].$b[3]);
+			$tempsql .= ",(".$connection->quote($token).", ".crc32($token).", ".$minichecksum.")";
+		}
+		$tempsql[0] = " ";
+		$tokpdo = $connection->query("INSERT IGNORE INTO PMBtoktemp$index_suffix (token, checksum, minichecksum) VALUES $tempsql");
+		unset($temporary_token_ids);
+	}
+	
 	if ( $awaiting_writes )
 	{
-		if ( !empty($temporary_token_ids) )
-		{
-			$tempsql = "";
-			foreach ( $temporary_token_ids as $token => $val ) 
-			{
-				$b = md5($token);
-				$minichecksum = hexdec($b[0].$b[1].$b[2].$b[3]);
-				$tempsql .= ",(".$connection->quote($token).", ".crc32($token).", ".$minichecksum.")";
-			}
-			$tempsql[0] = " ";
-			$tokpdo = $connection->query("INSERT IGNORE INTO PMBtoktemp$index_suffix (token, checksum, minichecksum) VALUES $tempsql");
-			unset($temporary_token_ids);
-		}
-		
 		# update temporary statistics
 		$connection->query("UPDATE PMBIndexes SET 
 					temp_loads = temp_loads + $awaiting_writes,
@@ -1447,18 +1389,15 @@ try
 		$datapdo = $connection->prepare("INSERT INTO PMBdatatemp$index_suffix (checksum,
 																				minichecksum, 
 																				doc_id, 
-																				count, 
-																				".$senti_insert_sql_column." 
-																				checksum_2,
-																				minichecksum_2, 
-																				field_id) VALUES $insert_data_sql");
+																				field_pos 
+																				".$senti_sql_index_column." 
+																				) VALUES $insert_data_sql");
 		$datapdo->execute($insert_data_escape);
 		
 		$log .= "token data inserts OK  \n";
 		$loop_log .= "token data inserts OK  \n";
 		
 		$insert_data_sql = "";
-		$up = 0;
 		$awaiting_writes = 0;
 		
 		$log .= "new word occurances ok \n";

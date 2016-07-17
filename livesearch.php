@@ -18,7 +18,7 @@ livesearch.php
 
 if ( !empty($_GET["q"]) )
 {
-	include("PMBApi.php");
+	
 	
 	# calculate how many results can be fitted into the viewport
 	$slots = 4;
@@ -38,10 +38,12 @@ if ( !empty($_GET["q"]) )
 	{
 		$index_name = $_GET["index_name"];
 	}
+
+	include("PMBApi.php");
 	
 	# the index name can be defined with the constructor or later on with SetIndex-method
 	$pickmybrain = new PickMyBrain($index_name); 
-	
+
 	$result = $pickmybrain->Search($_GET["q"], $offset, $slots);
 	
 	#echo "Final Memory usage: " . memory_get_usage()/1024/1024 . " MB"; 				# for debugging

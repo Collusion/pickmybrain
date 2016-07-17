@@ -27,9 +27,23 @@ if ( !isset($process_number) )
 	require_once("db_connection.php");
 }
 
+# open the process specific file
+if ( !empty($mysql_data_dir) )
+{
+	$directory = $mysql_data_dir; # custom directory
+}
+else
+{
+	$directory = realpath(dirname(__FILE__));
+}
+$filepath =  $directory . "/pretemp_".$index_id."_sorted.txt";
+$f = fopen($filepath, "r");
+
+require "data_partitioner.php";
+
 # launch sister processes here if multiprocessing is turned on! 
 if ( $dist_threads > 1 && $process_number === 0  ) 
-{	
+{
 	# launch sister-processes
 	for ( $x = 1 ; $x < $dist_threads ; ++$x ) 
 	{
@@ -37,15 +51,17 @@ if ( $dist_threads > 1 && $process_number === 0  )
 		if ( $enable_exec )
 		{
 			# launch via exec()	
-			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x");
+			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x data_partition=" . implode("-", $data_partitions[$x]));
 		}
 		else
 		{
 			# launch via async curl
-			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x";
+			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x"."&data_partition=" . implode("-", $data_partitions[$x]);
 			execWithCurl($url_to_exec);
 		}
 	}
+	
+	$data_partition = $data_partitions[0];
 }
 
 if ( $process_number !== 0 ) 
@@ -69,31 +85,9 @@ try
 	}
 	
 	$unbuffered_connection = db_connection(false);
-	
-	$max_id = pow(2, 32);
-	$scale = (int)($max_id / $dist_threads);
-	$start_checksum = $process_number * $scale;
-
-	$min_checksum = $start_checksum;
-	$max_checksum = $min_checksum + $scale;
-	
-	$where_sql = "WHERE checksum >= $min_checksum AND checksum < $max_checksum";
-	
-	if ( $process_number == $dist_threads-1 ) 
-	{
-		# last thread ( with biggest offset ) 
-		$max_checksum = $max_id;
-		$where_sql = "WHERE checksum >= $min_checksum AND checksum <= $max_checksum";
-	}
-	
-	if ( $dist_threads ===  1 ) 
-	{
-		$where_sql = "";
-	}
 		
 	$combinations 			= array();
 	$temp_sql 				= "";
-	$escape					= array();
 	$s = 0;
 	$x = 1;
 	
@@ -102,6 +96,7 @@ try
 	{
 		$bin_val = pack("H*", sprintf("%02x", $i));
 		$hex_lookup_encode[$i] = $bin_val;
+		$hex_lookup_decode[$bin_val] = $i;
 	}
 	
 	$tokens_start = microtime(true);
@@ -143,62 +138,119 @@ try
 	$flush_interval			= 40;
 	$insert_counter 		= 0;
 
-	$pdo = $unbuffered_connection->query("SELECT 
-								checksum,
-								(token_checksum << 6 | cutlen) as combined
-								FROM PMBpretemp$index_suffix
-								$where_sql
-								ORDER BY checksum");								
-											
+	$last_row = false;
+	$counter = 0;										
 	$rowcounter = 0;
+	$min_checksum = 0;
 	
 	if ( $process_number === 0 ) 
 	{
 		$connection->beginTransaction();
 	}
 	
-	while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) )
+	fseek($f, $data_partition[0]);
+	$maximum_checksum = (int)($data_partition[1]);
+	$sql_checksum	  = (int)($data_partition[2]);
+
+	$oldpdo = $unbuffered_connection->query("SELECT * FROM PMBPrefixes$index_suffix WHERE checksum >= $sql_checksum AND checksum < $maximum_checksum ORDER BY checksum");
+	
+	file_put_contents("/var/www/localsearch/error.txt", "\r\nprefix_compressor start ($process_number): start data offset: ".$data_partition[0]." maximum_checksum: $maximum_checksum sql_checksum: $sql_checksum ", FILE_APPEND);
+	
+	# prefetch first old row
+	$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
+	
+	while ( !$last_row )
 	{
 		++$rowcounter;
+		++$counter;
 		
-		$checksum 		= (int)$row["checksum"];
-		$combined		= (int)$row["combined"];
+		if ( $line = fgets($f) )
+		{
+			$p = explode(" ", trim($line));
+			$checksum = hexdec($p[0]);
+		}
+		else
+		{
+			echo "LAST ROW - counter: $counter process_number: $process_number \n";
+			$last_row = true;
+			
+			if ( $counter === 1 ) 
+			{
+				break;
+			}
+		}
 		
 		# different checksum ! 
-		if ( $min_checksum > $start_checksum && $checksum !== $min_checksum ) 
+		if ( ($min_checksum && $checksum !== $min_checksum) || $last_row ) 
 		{
-			# sort combinations
-			sort($combinations);
-
-			$delta = 1;
-			$bin_data = "";
-			
-			foreach ( $combinations as $c_i => $integer )
+			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) ) 
 			{
-				$tmp = $integer-$delta+1;
+				$temp_sql .= ",(".$oldrow["checksum"].", ".$connection->quote($oldrow["tok_data"]).")";
+				++$s;
 				
-				do
+				if ( $s >= $write_buffer_len ) 
 				{
-					$lowest7bits = $tmp & 127;
-					$tmp >>= 7;
+					$insert_start = microtime(true);
+					# write to disk 
+					$temp_sql[0] = " ";
+					$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES " . $temp_sql);
+					$insert_time += (microtime(true)-$insert_start);
+					++$insert_counter;
 					
-					if ( $tmp ) 
+					unset($temp_sql);				
+					$temp_sql 		= "";
+					$s				= 0;
+					
+					if ( $process_number === 0 && $insert_counter >= $flush_interval )
 					{
-						$bin_data .= $hex_lookup_encode[$lowest7bits];
-					}
-					else
-					{
-						$bin_data .= $hex_lookup_encode[(128 | $lowest7bits)];
+						$connection->commit();
+						$connection->beginTransaction();
+						$insert_counter = 0;
 					}
 				}
-				while ( $tmp ) ;
-		
-				$delta = $integer;
+				
+				# fetch new row
+				$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
 			}
-
-			$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
-			++$s;
-
+			
+			# if these rows are to be combined
+			if ( $oldrow && $min_checksum == $oldrow["checksum"]  )
+			{
+				# step 1: decode the old data
+				$old_combinations = VBDeltaDecode($oldrow["tok_data"], $hex_lookup_decode);
+				
+				# step 2: merge the data
+				foreach ( $old_combinations as $old_comb ) 
+				{
+					$combinations[] = $old_comb;
+				}
+				
+				# step 3: remove duplicate values
+				$combinations = array_flip(array_flip($combinations));
+				
+				# step 4: sort combinations
+				sort($combinations);
+				
+				# step 5: recompress
+				$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
+				
+				$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
+				++$s;
+				
+				# fetch new oldrow
+				$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
+			}
+			else
+			{
+				# just insert the current row, because min_checksum < $oldrow["checksum"]
+				# in other terms: this is a completely new prefix
+				sort($combinations);
+				$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
+				
+				$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
+				++$s;
+			}
+			
 			if ( $s >= $write_buffer_len ) 
 			{
 				$insert_start = microtime(true);
@@ -222,9 +274,21 @@ try
 			
 			unset($combinations, $bin_data);
 			$combinations = array();
+			
+			if ( $min_checksum >= $maximum_checksum ) 
+			{
+				# end the process when checksum changes
+				break;
+			}
 		}
 		
-		$combinations[] = $combined;
+		foreach ( $p as $ind => $pdata ) 
+		{
+			if ( $ind > 0 ) 
+			{
+				$combinations[] = hexdec($pdata);
+			}
+		}
 
 		++$x;	
 		
@@ -240,7 +304,7 @@ try
 					
 			if ( !$permission )
 			{
-				$pdo->closeCursor();
+				if ( isset($pdo) ) $pdo->closeCursor();
 				$connection->query("UPDATE PMBIndexes SET current_state = 0 WHERE ID = $index_id");
 				if ( $process_number > 0 ) 
 				{
@@ -263,26 +327,46 @@ try
 	}
 	
 	echo "$rowcounter rows fetched \n";
-	
-	# compress remaining data
-	if ( !empty($combinations) )
+	$oldcount = 0;
+	# rest of the old data ( if availabe ) 
+	while ( $oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC) )
 	{
-		sort($combinations);
-				
-		$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
-								
-		$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
+		$temp_sql .= ",(".$oldrow["checksum"].", ".$connection->quote($oldrow["tok_data"]).")";
 		++$s;
-	}
+		++$oldcount;
 				
-	# after, try if there is still some data left
+		if ( $s >= $write_buffer_len ) 
+		{
+			$insert_start = microtime(true);
+			# write to disk 
+			$temp_sql[0] = " ";
+			$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES " . $temp_sql);
+			$insert_time += (microtime(true)-$insert_start);
+			++$insert_counter;
+					
+			unset($temp_sql);				
+			$temp_sql 		= "";
+			$s				= 0;
+					
+			if ( $process_number === 0 && $insert_counter >= $flush_interval )
+			{
+				$connection->commit();
+				$connection->beginTransaction();
+				$insert_counter = 0;
+			}
+		}
+	}
+	
+	file_put_contents("/var/www/localsearch/error.txt", "\r\nprefix_composer end ($process_number): rowcounter: $rowcounter oldcount: $oldcount ", FILE_APPEND);
+	
 	if ( !empty($temp_sql) )
 	{
-		# write to disk 
-		$temp_sql[0] = " ";
+		# write rest of the data
 		$insert_start = microtime(true);
+		$temp_sql[0] = " ";
 		$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES " . $temp_sql);
 		$insert_time += (microtime(true)-$insert_start);
+		++$insert_counter;
 	}
 	
 	if ( $process_number === 0 )
@@ -293,7 +377,7 @@ try
 }
 catch ( PDOException $e ) 
 {
-	echo "error during PMBPrefixes: ";
+	echo "error during PMBPrefixes ($process_number): ";
 	echo $e->getMessage();
 }
 
@@ -321,7 +405,6 @@ try
 			{
 				$ins_sql[0] = " ";
 				$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
-				#$inspdo->execute($escape);
 				$ins_sql = "";
 				$w = 0;
 				++$insert_counter;
@@ -341,11 +424,10 @@ try
 		$temppdo->closeCursor();
 		
 		# rest of the values
-		if ( !empty($ins_sql) ) 
+		if ( !empty($escape) ) 
 		{
 			$ins_sql[0] = " ";
 			$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
-			#$inspdo->execute($escape);
 			$ins_sql = "";
 			$insert_counter = 0;
 		}
@@ -366,7 +448,7 @@ try
 		
 		$connection->commit();
 		$drop_end = microtime(true) - $drop_start;
-	}	
+	}
 }
 catch ( PDOException $e ) 
 {
@@ -374,17 +456,19 @@ catch ( PDOException $e )
 	echo $e->getMessage();
 }
 
-try
-{
-	# remove the temporary table
-	$connection->exec("DROP TABLE PMBpretemp$index_suffix");	
-}
-catch ( PDOException $e ) 
-{
-	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
-}
-
 $tokens_end = microtime(true) - $tokens_start;
+
+# remove the temporary file
+if ( !empty($mysql_data_dir) )
+{
+	$directory = $mysql_data_dir; # custom directory
+}
+else
+{
+	$directory = realpath(dirname(__FILE__));
+}
+$filepath =  $directory . "/pretemp_".$index_id."_sorted.txt";
+@unlink($filepath);
 
 echo "Inserting tokens into temp tables took $token_insert_time seconds \n";
 echo "Updating statistics took $statistic_total_time seconds \n";

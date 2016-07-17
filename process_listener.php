@@ -43,12 +43,13 @@ if ( $dist_threads > 1 )
 				break;
 			}
 			
-			# if only the LSB bit is on ( the master process , equal to 1 ) , we can proceed
-			if ( $row["running_processes"] == 1 ) 
+			/*if ( $row["running_processes"] == 1 ) 
 			{
 				break;
 			}
-			else if ( $row["indexing_permission"] == 0 ) 
+			else */
+			# if only the LSB bit is on ( the master process , equal to 1 ) , we can proceed
+			if ( $row["indexing_permission"] == 0 ) 
 			{
 				SetIndexingState(0, $index_id);
 				die("Indexing was requested to be terminated.\n");

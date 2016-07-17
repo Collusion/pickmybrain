@@ -12,7 +12,7 @@
 # check input parameters only if process number is not defined at all
 # ==> this file is launched as a separate process
 if ( !isset($process_number) )
-{
+{	
 	ini_set("display_errors", 1);
 	error_reporting(E_ALL);
 	mb_internal_encoding("UTF-8");
@@ -23,25 +23,6 @@ if ( !isset($process_number) )
 	require_once("input_value_processor.php");
 	require_once("tokenizer_functions.php");
 	require_once("db_connection.php");
-}
-
-# dialect processing
-if ( $dialect_processing )
-{
-	# generate array of values to find and replace
-	# for cloning tokens
-	if ( !empty($dialect_replacing) )
-	{
-		$dialect_find = array_keys($dialect_replacing);
-		$dialect_replace = array_values($dialect_replacing);
-	}
-	
-	# for mass replacing
-	if ( !empty($dialect_array) )
-	{
-		$mass_find = array_keys($dialect_array);
-		$mass_replace = array_values($dialect_array);
-	}
 }
 
 # launch sister processes here if multiprocessing is turned on! 
@@ -70,6 +51,26 @@ if ( $process_number !== 0 )
 	register_shutdown_function("shutdown", $index_id, $process_number);
 }
 
+
+# dialect processing
+if ( $dialect_processing )
+{
+	# generate array of values to find and replace
+	# for cloning tokens
+	if ( !empty($dialect_replacing) )
+	{
+		$dialect_find = array_keys($dialect_replacing);
+		$dialect_replace = array_values($dialect_replacing);
+	}
+	
+	# for mass replacing
+	if ( !empty($dialect_array) )
+	{
+		$mass_find = array_keys($dialect_array);
+		$mass_replace = array_values($dialect_array);
+	}
+}
+
 try
 {	
 	# update current process state
@@ -96,16 +97,6 @@ try
 		++$min_dictionary_id;
 	}
 	
-	# if we have encountered (enough) new tokens disable indexes
-	if ( $max_temp_id > $min_dictionary_id + 1000 ) 
-	{
-		$connection->query("ALTER TABLE PMBpretemp$index_suffix DISABLE KEYS;");
-	}
-	else
-	{
-		echo "No need to disable keys...\n";
-	}
-	
 	if ( $max_temp_id == $min_dictionary_id )
 	{
 		echo "No new prefixes to create ...\n";
@@ -129,7 +120,7 @@ try
 		$where_sql = "LIMIT $start_id, 9999999999";
 	}
 
-	if ( $dist_threads == 1 ) 
+	if ( $dist_threads === 1 ) 
 	{
 		$where_sql = "";
 	}
@@ -137,6 +128,8 @@ try
 	$maximum_prefix_len 	= 20;
 	$insert_prefix_sql 		= "";
 	
+	file_put_contents("/var/www/localsearch/error.txt", "\r\nprefix_composert start: ($process_number) start_id: $start_id scale: $scale", FILE_APPEND);
+
 	$s = 0;
 	$x = 1;
 	$pr = 0;
@@ -151,15 +144,21 @@ try
 	$insert_time = 0;
 	$statistic_total_time = 0;
 	
-	ob_start();
-	var_dump($dialect_find);
-	$res = ob_get_clean();
-	
-	file_put_contents("/var/www/localsearch/error2.txt", "\r\ndialect: $res ($process_number)", FILE_APPEND);
-	
 	# create an another connection 
 	$unbuffered_connection = db_connection(false);
-
+	
+	if ( !empty($mysql_data_dir) )
+	{
+		$directory = $mysql_data_dir; # custom directory
+	}
+	else
+	{
+		$directory = realpath(dirname(__FILE__));
+	}
+	$filepath = $directory . "/pretemp_".$index_id."_".$process_number.".txt";
+	$f = fopen($filepath, "a");
+	
+	$write_buffer = array();
 	$pdo = $unbuffered_connection->query("SELECT token FROM PMBtoktemp$index_suffix $where_sql");
 	
 	while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) ) 
@@ -175,8 +174,10 @@ try
 			if ( $nodialect !== $token ) 
 			{
 				# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
-				$insert_prefix_sql 		.= ",(".crc32($nodialect).",$token_crc32,0)";	
 				++$pr;
+				$prefix_word = crc32($nodialect);
+				if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
+				$write_buffer[$prefix_word] .= " ".dechex($token_crc32 << 6);
 			}
 		}
 		
@@ -199,9 +200,10 @@ try
 					{
 						for ( $j = 0 ; ($i + $j) <= $wordlen ; ++$j )
 						{
-							$prefix_word = mb_substr($token, $j, $i);
+							$prefix_word = crc32(mb_substr($token, $j, $i));
+							if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
+							$write_buffer[$prefix_word] .= " ".dechex(($token_crc32 << 6)|($wordlen-$i));
 							# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
-							$insert_prefix_sql 		.= ",(".crc32($prefix_word).",$token_crc32,".($wordlen-$i).")";
 							++$pr;
 						}
 					}
@@ -212,18 +214,20 @@ try
 					# prefix
 					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
 					{
-						$prefix_word = mb_substr($token, 0, $i);
+						$prefix_word = crc32(mb_substr($token, 0, $i));
+						if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
 						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
-						$insert_prefix_sql 		.= ",(".crc32($prefix_word).",$token_crc32,".($wordlen-$i).")";
+						$write_buffer[$prefix_word] .= " ".dechex(($token_crc32 << 6)|($wordlen-$i));
 						++$pr;
 					}
 					
 					# postfix
 					for ( $i = 1 ; $wordlen-$i >= $min_prefix_len ; ++$i )
 					{
-						$prefix_word = mb_substr($token, $i);
+						$prefix_word = crc32(mb_substr($token, $i));
+						if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
 						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
-						$insert_prefix_sql 		.= ",(".crc32($prefix_word).",$token_crc32,$i)";
+						$write_buffer[$prefix_word] .= " ".dechex(($token_crc32 << 6)|$i);
 						++$pr;
 					}
 				}
@@ -232,9 +236,10 @@ try
 					# default: prefixes only
 					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
 					{
-						$prefix_word = mb_substr($token, 0, $i); 
+						$prefix_word = crc32(mb_substr($token, 0, $i)); 
+						if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
 						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
-						$insert_prefix_sql 		.= ",(".crc32($prefix_word).",$token_crc32,".($wordlen-$i).")";
+						$write_buffer[$prefix_word] .= " ".dechex(($token_crc32 << 6)|($wordlen-$i));
 						++$pr;
 					}
 				}
@@ -242,81 +247,79 @@ try
 		}
 		
 		# if we have over 2000 prefixes already, insert them here and reset 
-		if ( $pr > 2000 )
+		if ( $pr > 20000 )
 		{
-			$insert_prefix_sql[0] = " "; # trim the first comma
+			$write_buf = "";
 			$ins_start = microtime(true);
-			$updpdo = $connection->query("INSERT INTO PMBpretemp$index_suffix (checksum, token_checksum, cutlen) VALUES $insert_prefix_sql");
+			foreach ( $write_buffer as $checksum => $tokdata ) 
+			{
+				$write_buf .= sprintf("%8X", $checksum)."$tokdata\n";
+			}
+						
+			fwrite($f, $write_buf);
 			$total_insert_time += (microtime(true) - $ins_start);
 			
 			$prefix_total_count += $pr;
 			# reset variables
-			$insert_prefix_sql = "";
 			$pr = 0;
+			unset($write_buffer, $write_buf);
+			$write_buffer = array();
 			$log .= "prefix inserts ok \n";
 			$loop_log .= "prefix inserts ok \n";
 		}	
 	}
-	
-	#$pdo->closeCursor();
-	#unset($pdo);
+
+	$pdo->closeCursor();
+	unset($pdo);
 
 	# insert rest of the prefixes, if available
 	# if we have over 2000 prefixes already, insert them here and reset 
-	if ( !empty($insert_prefix_sql) )
+	if ( !empty($write_buffer) )
 	{
-		$insert_prefix_sql[0] = " "; # trim the first comma
+		$write_buf = "";
 		$ins_start = microtime(true);
-		$updpdo = $connection->query("INSERT INTO PMBpretemp$index_suffix (checksum, token_checksum, cutlen) VALUES $insert_prefix_sql");
+		foreach ( $write_buffer as $checksum => $tokdata ) 
+		{
+			$write_buf .= sprintf("%8X", $checksum)."$tokdata\n";
+		}
+					
+		fwrite($f, $write_buf);
 		$total_insert_time += (microtime(true) - $ins_start);
-		file_put_contents("/var/www/localsearch/error2.txt", "\r\nLast prefixes count: $pr ($process_number)", FILE_APPEND);
 		
-		$prefix_total_count += $pr;	
+		$prefix_total_count += $pr;
 		# reset variables
-		$insert_prefix_sql = "";
 		$pr = 0;
-		$log .= "residual prefix inserts ok \n";
-		$loop_log .= "residual prefix inserts ok \n";
+		unset($write_buffer, $write_buf);
+		$write_buffer = array();
+		$log .= "prefix inserts ok \n";
+		$loop_log .= "prefix inserts ok \n";
 	}
 }
 catch ( PDOException $e ) 
 {
 	echo "error during composing prefixes: ";
 	echo $e->getMessage();
-	file_put_contents("/var/www/localsearch/error2.txt", "\r\nERROR:".$e->getMessage()." ($process_number)", FILE_APPEND);
 }
 
-file_put_contents("/var/www/localsearch/error2.txt", "\r\nMode: $prefix_mode Minlen: $prefix_length SQL: $where_sql Total tokens: $token_total_count Total prefixes: $prefix_total_count ($process_number)", FILE_APPEND);
+fclose($f);
+
+file_put_contents("/var/www/localsearch/error.txt", "\r\nSQL: $where_sql Total tokens: $token_total_count Total prefixes: $prefix_total_count ($process_number)", FILE_APPEND);
 
 # wait for another processes to finish
 require("process_listener.php");
 
 $interval = microtime(true) - $timer;
-echo "All prefix processes have now finished, $interval seconds elapsed, enabling keys... \n";
-
-
-try
-{
-	# now, enable keys for the prefix table
-	if ( $max_temp_id > $min_dictionary_id + 1000 ) 
-	{
-		$keys_start = microtime(true);
-		$connection->exec("ALTER TABLE PMBpretemp$index_suffix ENABLE KEYS;");
-		$keys_end = microtime(true) - $keys_start;
-	}
-}
-catch ( PDOException $e ) 
-{
-}
+echo "All prefix processes have now finished, $interval seconds elapsed... \n";
 
 echo "prefix composer is now finished \n";
 $tokens_end = microtime(true) - $tokens_start;
+
+
 
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
 echo "$token_total_count tokens and $prefix_total_count prefixes processed \n";
 echo "Inserting tokens into temp tables took $total_insert_time seconds \n";
-if ( isset($keys_end) ) echo "Enabling keys for table took $keys_end seconds \n";
 echo "-------------------------------------------------\nComposing prefixes took $tokens_end seconds \n-------------------------------------------------\n";
 
 

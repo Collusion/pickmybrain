@@ -27,6 +27,20 @@ if ( !isset($process_number) )
 	require_once("db_connection.php");
 }
 
+# open the process specific file
+if ( !empty($mysql_data_dir) )
+{
+	$directory = $mysql_data_dir; # custom directory
+}
+else
+{
+	$directory = realpath(dirname(__FILE__));
+}
+$filepath = $directory."/datatemp".$index_suffix."_sorted.txt";
+$f = fopen($filepath, "r");
+
+require "data_partitioner.php";
+
 # launch sister processes here if multiprocessing is turned on! 
 if ( $dist_threads > 1 && $process_number === 0  ) 
 {
@@ -37,15 +51,20 @@ if ( $dist_threads > 1 && $process_number === 0  )
 		if ( $enable_exec )
 		{
 			# launch via exec()	
-			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x");
+			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x data_partition=" . implode("-", $data_partitions[$x]));
 		}
 		else
 		{
 			# launch via async curl
-			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x";
+			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x"."&data_partition=" . implode("-", $data_partitions[$x]);
 			execWithCurl($url_to_exec);
 		}
 	}
+	
+	$data_partition = $data_partitions[0];
+	
+		
+	print_r($data_partitions);
 }
 
 if ( $process_number !== 0 ) 
@@ -64,7 +83,7 @@ try
 	}
 	
 	$unbuffered_connection = db_connection(false);
-	$old_unbuffered_connection = db_connection(false);
+	$second_unbuffered_connection = db_connection(false);
 	
 	# for keeping tabs on progress
 	$total_rows = 0;
@@ -74,22 +93,6 @@ try
 	
 	$x = 0;
 	
-	$max_id = pow(2, 32);
-	$scale = (int)($max_id / $dist_threads);
-	$start_checksum = $process_number * $scale;
-
-	$min_checksum = $start_checksum;
-	$max_checksum = $min_checksum + $scale;
-
-	$where_sql = "WHERE PMBdatatemp".$index_suffix.".checksum >= $min_checksum AND PMBdatatemp".$index_suffix.".checksum < $max_checksum";
-
-	if ( $process_number == $dist_threads-1 ) 
-	{
-		# last thread ( with biggest offset ) 
-		$max_checksum = $max_id;
-		$where_sql = "WHERE PMBdatatemp".$index_suffix.".checksum >= $min_checksum AND PMBdatatemp".$index_suffix.".checksum <= $max_checksum";
-	}
-
 	# create a temporary table if this is not the main process
 	if ( $process_number > 0 ) 
 	{
@@ -125,15 +128,6 @@ try
 		}
 	}
 
-	if ( $dist_threads === 1 ) 
-	{
-		$where_sql = "";
-	}
-	
-	# for fetching data
-	$datatemp_limit = 10000;
-	$sql_query_limit		= ceil($scale / $datatemp_limit);
-
 	$rows = 0;
 	$write_buffer_len = 250;
 	$flush_interval	= 	40;
@@ -145,7 +139,6 @@ try
 	$min_checksum = 0;
 	$min_token = 0;
 	$min_doc_id = 0;
-	$min_tok_2_id = 0;
 
 	$token_insert_time = 0;
 	$statistic_total_time = 0;
@@ -158,29 +151,12 @@ try
 		$hex_lookup_encode[$i] = $bin_val;
 		$hex_lookup_decode[$bin_val] = $i;
 	}
-	
-	$senti_sql_index_column = "";
-	if ( $sentiment_analysis )
-	{
-		$senti_sql_index_column = ",sentiscore";
-	}
-	
+
 	# get initial memory usage
 	$write_buffer_size	  = 20*1024*1024;
 	$initial_memory_usage = memory_get_usage();
 	$memory_usage_limit	  = $initial_memory_usage + $write_buffer_size;
 
-	$subpdo = $unbuffered_connection->query("SELECT 
-											PMBdatatemp".$index_suffix.".checksum, 
-											D.token,
-											doc_id, 
-											field_pos as combined
-											".$senti_sql_index_column."
-											FROM PMBdatatemp".$index_suffix."
-											STRAIGHT_JOIN PMBtoktemp".$index_suffix." D ON (D.checksum = PMBdatatemp".$index_suffix.".checksum AND D.minichecksum = PMBdatatemp".$index_suffix.".minichecksum)
-											$where_sql
-											ORDER BY PMBdatatemp".$index_suffix.".checksum, PMBdatatemp".$index_suffix.".minichecksum, doc_id, field_pos");
-	
 	$last_row = false;
 	$counter = 0;
 	
@@ -195,43 +171,72 @@ try
 		$connection->beginTransaction();
 	}
 	
+	fseek($f, $data_partition[0]);
+	$maximum_checksum = (int)($data_partition[1]>>16);
+	$sql_checksum	  = (int)($data_partition[2]>>16);
+	
 	$combinations = 0;
 	$oldreads = 1;
-	$oldpdo = $old_unbuffered_connection->query("SELECT * FROM PMBTokens$index_suffix " . str_replace("PMBdatatemp".$index_suffix.".", "", $where_sql) . " ORDER BY checksum");
+	$oldpdo = $unbuffered_connection->query("SELECT * FROM PMBTokens$index_suffix WHERE checksum >= $sql_checksum AND checksum < $maximum_checksum ORDER BY checksum");
 	
 	# prefetch first old row
 	$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
-
+	
+	$tokpdo = $second_unbuffered_connection->query("SELECT ((checksum<<16)|minichecksum) as checksum, 
+													token
+													FROM PMBtoktemp$index_suffix 
+													WHERE checksum >= $sql_checksum
+													ORDER BY checksum, minichecksum");
+																								
+	$tokrow = $tokpdo->fetch(PDO::FETCH_ASSOC);
+	$tokrow["checksum"] = +$tokrow["checksum"];
+	
 	while ( !$last_row )
 	{
 		++$counter;
 		
-		$row = $subpdo->fetch(PDO::FETCH_ASSOC);
-		
-		if ( $row )
+		if ( $line = fgets($f) )
 		{
-			$checksum 	= +$row["checksum"];
-			$doc_id 	= +$row["doc_id"];
-			$token		= $row["token"];
-			$combined	= +$row["combined"];
+			$p = explode(" ", preg_replace('/ {2,}/', ' ', trim($line)));
+			
+			$bigchecksum 	= hexdec($p[0]);
+			$checksum 		= $bigchecksum>>16;
+			$doc_id 		= hexdec($p[1]);
+			
+			if ( $sentiment_analysis ) 
+			{
+				$sentiscore = hexdec($p[2]);
+				$r = 3;
+			}
+			else
+			{
+				$r = 2;
+			}
+
+			$advances = 0;
+			# advance token tables rowpointer ( if necessary ) 
+			while ( $tokrow["checksum"] < $bigchecksum )
+			{
+				++$advances;
+				$beforevalue = $tokrow["checksum"];
+				$tokrow = $tokpdo->fetch(PDO::FETCH_ASSOC);
+				$tokrow["checksum"] = +$tokrow["checksum"];
+			}
+
+			$token 		= $tokrow["token"];
 		}
 		else
 		{
-			echo "LAST ROW - counter: $counter process_number: $process_number \n";
 			$last_row = true;
-			
-			if ( $counter === 1 ) 
-			{
-				break;
-			}
 		}
 		
 		# document has changed => compress old data
-		if ( ($min_checksum > $start_checksum && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
+		if ( ($min_token && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
 		{
 			++$document_count;
 			/* DeltaVBencode the document id here */
 			$tmp = $min_doc_id-$m_delta+1;
+			
 			do
 			{
 				$lowest7bits = $tmp & 127;
@@ -312,7 +317,7 @@ try
 		
 				$delta = $datavalue;
 			}
-
+			
 			$token_data_string .= $bin_separator . $temp_string;
 			
 			# reset variables
@@ -322,7 +327,7 @@ try
 		}
 
 		# token_id changes now ! 
-		if ( ($min_checksum > $start_checksum && $token !== $min_token) || $last_row ) 
+		if ( ($min_token && $token !== $min_token) || $last_row ) 
 		{
 			/*  fetch and insert the old data into the new table */
 			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) )
@@ -365,9 +370,9 @@ try
 				{
 					$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC);
 					++$oldreads;
-				}	
+				}
 			}
-			
+
 			# if these rows are to be combined
 			if ( $oldrow && $min_checksum == $oldrow["checksum"]  )
 			{
@@ -404,7 +409,7 @@ try
 					# fetch next oldrow from database
 					$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC); 
 					++$oldreads;
-					
+
 					if ( $oldrow["checksum"] == $min_checksum && $oldrow["token"] == $min_token )
 					{
 						# combine old data with new data !
@@ -419,7 +424,7 @@ try
 						++$combinations;
 						++$x;
 						++$w;
-							
+
 						$oldrow = $oldrow_copy; # this row is not yet inserted 
 					}
 					else
@@ -440,17 +445,14 @@ try
 							$row_storage = $oldrow;
 							unset($oldrow);
 							$oldrow = $oldrow_copy;
-							unset($oldrow_copy);
-							
+							unset($oldrow_copy);							
 						}
+						
 						else
 						{
-							echo "NEW: checksum: $min_checksum min_token: $min_token \n";
-							echo "OLD: checksum: ".$oldrow["checksum"]." min_token: ".$oldrow["token"]." \n\n";
+							# 3rd checksum collision ! 
 						}
 					}
-					
-					unset($oldrow_copy);
 				}
 			}
 			else # just insert the current row, because min_checksum < $oldrow["checksum"]
@@ -491,18 +493,28 @@ try
 					$insert_counter = 0;
 				}
 			}	
+			
+			if ( $min_checksum >= $maximum_checksum ) 
+			{
+				# end the process when checksum changes
+				break;
+			}
 		}
 
-		$token_match_data[] = $combined;
+		while ( isset($p[$r]) )
+		{
+			$token_match_data[] = hexdec($p[$r]);
+			++$r;
+		}
 
 		if ( $sentiment_analysis ) 
 		{
-			$document_senti_score += +$row["sentiscore"];
+			$document_senti_score += $sentiscore;
 		}
 		
 		# gather and write data
 		$min_checksum 	= $checksum;
-		$min_token 		= $token;
+		$min_token 	= $token;
 		$min_doc_id 	= $doc_id;
 		$min_token		= $token;
 		
@@ -591,7 +603,10 @@ catch ( PDOException $e )
 {
 	echo "Error during PMBTokens ($process_number) : \n";
 	echo $e->getMessage();	
+	die();
 }
+
+fclose($f);
 
 try
 {
@@ -624,6 +639,8 @@ unset($row, $oldrow);
 # wait for another processes to finish
 require("process_listener.php");
 
+
+
 $initial_memory_usage = memory_get_usage();
 $memory_usage_limit	  = $initial_memory_usage + $write_buffer_size;
 $interval = microtime(true) - $timer;
@@ -635,13 +652,12 @@ echo "Latent oldreads: $latent_oldreads \n";
 try
 {
 	# remove the temporary table
-	$connection->exec("DROP TABLE PMBdatatemp$index_suffix");	
+	#$connection->exec("DROP TABLE PMBdatatemp$index_suffix");	
 }
 catch ( PDOException $e ) 
 {
 	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
 }
-
 
 try
 {
@@ -720,6 +736,18 @@ catch ( PDOException $e )
 
 $tokens_end = microtime(true) - $tokens_start;
 
+# remove the file after everything is done
+if ( !empty($mysql_data_dir) )
+{
+	$sorted_dir = $mysql_data_dir; # custom directory
+}
+else
+{
+	$sorted_dir = realpath(dirname(__FILE__));
+}
+$filepath = $directory."/datatemp".$index_suffix."_sorted.txt";
+@unlink($filepath);
+
 echo "Inserting tokens into temp tables took $token_insert_time seconds \n";
 echo "Updating statistics took $statistic_total_time seconds \n";
 echo "Combining temp tables took $transfer_time_end seconds \n";
@@ -727,10 +755,6 @@ if ( !$clean_slate ) echo "Switching tables took $drop_end seconds \n";
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
 echo "------------------------------------------------\nCompressing token data took $tokens_end seconds \n------------------------------------------------\n\nWaiting for prefixes...";
-
-
-
-
 
 
 
