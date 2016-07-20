@@ -60,11 +60,6 @@ if ( $dist_threads > 1 && $process_number === 0  )
 			execWithCurl($url_to_exec);
 		}
 	}
-	
-	$data_partition = $data_partitions[0];
-	
-		
-	print_r($data_partitions);
 }
 
 if ( $process_number !== 0 ) 

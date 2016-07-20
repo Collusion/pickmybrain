@@ -55,11 +55,7 @@ $a_parents["sub"] = 1;
 $node_trim_chars = array("-", "/", "|");
 $log = "";
 $lp = 0; 
-$webpages = 0;
-
-# write buffer variables
-$write_buffer_len = 10;
-$awaiting_writes = 0;
+$documents = 0;
 
 $url_list = array();
 $allowed_domains = array();
@@ -177,35 +173,6 @@ try
 		$data_dir_sql = "DATA DIRECTORY = '$mysql_data_dir' INDEX DIRECTORY = '$mysql_data_dir'";
 	}
 	
-	$temporary_table_type = "ENGINE=MYISAM DEFAULT CHARSET=utf8 ROW_FORMAT=FIXED $data_dir_sql";
-
-	$senti_sql_column = "";
-	$senti_sql_index_column = "";
-	if ( $sentiment_analysis )
-	{
-		$senti_sql_column = "sentiscore tinyint(3) NOT NULL,";
-		$senti_sql_index_column = ",sentiscore";
-	}
-
-	$connection->exec("DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
-							CREATE TABLE IF NOT EXISTS PMBdatatemp$index_suffix (
-							checksum int(10) unsigned NOT NULL,
-							minichecksum smallint(7) unsigned NOT NULL,
-							doc_id int(10) unsigned NOT NULL,
-							field_pos int(10) unsigned,
-							".$senti_sql_column."
-							KEY (checksum,minichecksum,doc_id,field_pos".$senti_sql_index_column.")
-							) $temporary_table_type PACK_KEYS=1");
-											
-	# create new temporary tables				   
-	$connection->exec("DROP TABLE IF EXISTS PMBpretemp$index_suffix;
-							CREATE TABLE IF NOT EXISTS PMBpretemp$index_suffix (
-							checksum int(10) unsigned NOT NULL,
-							token_checksum int(10) unsigned NOT NULL,
-							cutlen tinyint(3) unsigned NOT NULL,
-							KEY (checksum, cutlen, token_checksum)
-							) $temporary_table_type PACK_KEYS=1");
-			
 	if ( $clean_slate || isset($purge_index) ) 
 	{				
 		$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
@@ -228,9 +195,6 @@ try
 		$connection->query("LOAD INDEX INTO CACHE PMBtoktemp$index_suffix;");	
 	}	
 
-	# disable non-unique keys					 
-	$connection->exec("ALTER TABLE PMBdatatemp$index_suffix DISABLE KEYS;");		
-						
 	echo "Temp tables created \n";					
 						
 	$timer = microtime(true);
@@ -370,9 +334,29 @@ if ( empty($url_list) )
 $bitshift = requiredBits($number_of_fields);
 $indexed_docs = 0;
 $token_stat_time = 0;
-$insert_data_sql = "";
+$insert_buffer = "";
 $insert_counter = 0;
 $flush_interval = 10;
+$write_buffer_len = 3;
+$awaiting_writes = 0;
+$data_rows = 0;
+$toktemp_total_insert = 0;
+$docinfo_extra_time = 0;
+
+if ( !empty($mysql_data_dir) )
+{
+	$directory = $mysql_data_dir; # custom directory
+}
+else
+{
+	$directory = realpath(dirname(__FILE__));
+}
+
+$filename = $directory . "/datatemp_".$index_id."_".$process_number.".txt";
+# create a new temporary file
+# remoe existing files
+@unlink($filename);
+$f = fopen($filename, "a");
 
 # start by disabling autocommit
 # flush write log to disk at every write buffer commit
@@ -384,7 +368,7 @@ while ( !empty($url_list[$lp]) )
 	$category_ids = array(NULL); 	# reset categories
 	$url = $url_list[$lp];
 	++$lp;  # advance the array pointer by one
-	++$webpages;
+	++$documents;
 	
 	# get a combination checksum for subdomain and domain
 	$domain_info = getDomainInfo($url, $suffix_list);
@@ -1119,6 +1103,8 @@ while ( !empty($url_list[$lp]) )
 
 	$aw = $awaiting_writes;
 
+	$tokens = array();
+	
 	foreach ( $fields as $field_id => $field ) 
 	{
 		$pos = 1;
@@ -1130,35 +1116,27 @@ while ( !empty($url_list[$lp]) )
 			if ( isset($match) && $match !== '' )
 			{
 				$temporary_token_ids[$match] = 1;
+				if ( empty($tokens[$match]) ) $tokens[$match] = "";
 				
-				#if ( isset(
-				$crc32 = crc32($match);
-				$b = md5($match);
-				$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
-				$field_pos = ($pos << $bitshift) | $field_id;
-				
-				# sentiment score
-				$wordsentiscore = 0;
-				if ( !empty($word_sentiment_scores[$match]) )
-				{
-					$wordsentiscore = $word_sentiment_scores[$match];
-				}
-				
-				if ( $sentiment_analysis ) 
-				{
-					$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $field_pos, $wordsentiscore)";
-				}
-				else
-				{
-					$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $field_pos)";
-				}
-				
+				$tokens[$match] .= " ".dechex(($pos<<$bitshift)|$field_id);
 				++$pos;
 			}
 		}
 	}
 	
 	unset($expl);
+	
+	foreach ( $tokens as $token => $string ) 
+	{
+		$crc32 = crc32($token);
+		$b = md5($token);
+		$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+		
+		$insert_buffer .= sprintf("%12X", ($crc32<<16)|$tid)." :$aw $string\n";
+		++$data_rows;
+	}
+	
+	unset($tokens);
 	
 	try
 	{	
@@ -1208,7 +1186,9 @@ while ( !empty($url_list[$lp]) )
 					$tempsql .= ",(".$connection->quote($token).", ".crc32($token).", ".$minichecksum.")";
 				}
 				$tempsql[0] = " ";
+				$tok_insert_start = microtime(true);
 				$tokpdo = $connection->query("INSERT IGNORE INTO PMBtoktemp$index_suffix (token, checksum, minichecksum) VALUES $tempsql");
+				$toktemp_total_insert += (microtime(true)-$tok_insert_start);
 				unset($temporary_token_ids);
 			}
 		
@@ -1239,28 +1219,29 @@ while ( !empty($url_list[$lp]) )
 											");												
 			$docpdo->execute($cescape);
 			$last_id = $connection->lastInsertId();
+			$docinfo_extra_time += (microtime(true)-$docinfo_time_start);
 			
+			# replace the :1 -> :20 entries with correct document ids
+			$insert_find = array();
+			$insert_repl = array();
 			$j = 0;
 			for ( $i = $last_id ; $i < $last_id+$count ; ++$i )
 			{
 				if ( isset($temporary_ids[$j]) )
 				{
-					$insert_data_escape[":doc_id$j"] = $i;
+					$insert_find[] = ":$j";
+					$insert_repl[] = "$i";
 				}
 				++$j;
 			}
+			
+			$insert_buffer = str_replace($insert_find, $insert_repl, $insert_buffer);
 				
 			$log .= "token data inserts start  \n";
 			$loop_log .= "token data inserts start  \n";
-			# checksum,token_id,doc_id,token_id_2,field_id,count,sentiscore
-			$insert_data_sql[0] = " "; 
-			$datapdo = $connection->prepare("INSERT INTO PMBdatatemp$index_suffix (checksum,
-																				minichecksum, 
-																				doc_id, 
-																				field_pos
-																				".$senti_sql_index_column." 
-																				) VALUES $insert_data_sql");
-			$datapdo->execute($insert_data_escape);
+
+			fwrite($f, $insert_buffer);
+			$insert_buffer = "";
 			
 			$log .= "token data inserts OK  \n";
 			$loop_log .= "token data inserts OK  \n";
@@ -1273,7 +1254,6 @@ while ( !empty($url_list[$lp]) )
 			
 			$docinfo_value_sets = array();
 			$cescape 			= array();
-			$insert_data_escape = array();
 			
 			++$insert_counter;		
 			# commit changes to disk and start a new transaction
@@ -1338,7 +1318,9 @@ try
 			$tempsql .= ",(".$connection->quote($token).", ".crc32($token).", ".$minichecksum.")";
 		}
 		$tempsql[0] = " ";
+		$tok_insert_start = microtime(true);
 		$tokpdo = $connection->query("INSERT IGNORE INTO PMBtoktemp$index_suffix (token, checksum, minichecksum) VALUES $tempsql");
+		$toktemp_total_insert += (microtime(true)-$tok_insert_start);
 		unset($temporary_token_ids);
 	}
 	
@@ -1371,33 +1353,35 @@ try
 										");												
 		$docpdo->execute($cescape);
 		$last_id = $connection->lastInsertId();
+		$docinfo_extra_time += (microtime(true)-$docinfo_time_start);
 		
+		# replace the :1 -> :20 entries with correct document ids
+		$insert_find = array();
+		$insert_repl = array();
 		$j = 0;
 		for ( $i = $last_id ; $i < $last_id+$count ; ++$i )
 		{
 			if ( isset($temporary_ids[$j]) )
 			{
-				$insert_data_escape[":doc_id$j"] = $i;
+				$insert_find[] = ":$j";
+				$insert_repl[] = "$i";
+					
 			}
 			++$j;
 		}
 			
+		$insert_buffer = str_replace($insert_find, $insert_repl, $insert_buffer);
+				
 		$log .= "token data inserts start  \n";
 		$loop_log .= "token data inserts start  \n";
-		
-		$insert_data_sql[0] = " "; 
-		$datapdo = $connection->prepare("INSERT INTO PMBdatatemp$index_suffix (checksum,
-																				minichecksum, 
-																				doc_id, 
-																				field_pos 
-																				".$senti_sql_index_column." 
-																				) VALUES $insert_data_sql");
-		$datapdo->execute($insert_data_escape);
+
+		fwrite($f, $insert_buffer);
+		$insert_buffer = "";
 		
 		$log .= "token data inserts OK  \n";
 		$loop_log .= "token data inserts OK  \n";
 		
-		$insert_data_sql = "";
+		$insert_buffer = "";
 		$awaiting_writes = 0;
 		
 		$log .= "new word occurances ok \n";
@@ -1440,6 +1424,8 @@ catch ( PDOException $e )
 {
 	echo "an error occurred during updating the remaining token rows \n" . $e->getMessage() . "\n";
 }
+
+fclose($f);
 	
 if ( $test_mode )
 {
@@ -1448,66 +1434,103 @@ if ( $test_mode )
 	return;
 }
 
-# if no new data was indexed
-if ( $indexed_docs === 0 ) 
+# no need for these anymore ! 
+unset($temporary_token_ids);
+
+echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
+echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
+
+# wait for another processes to finish
+require("process_listener.php");
+
+$interval = microtime(true) - $timer;
+echo "Maintaining a list of unique tokens took $toktemp_total_insert seconds \n";
+echo "Data tokenization is complete, $interval seconds elapsed, starting to compose prefixes...\n";
+
+if ( $documents === 0 ) 
 {
-	echo "No new data to index!\n";
-	$timer_end = microtime(true) - $timer;
-	echo "The whole operation took $timer_end seconds \n";
-	echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
-	echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
+	# no documents processed, no reason to continue!
 	SetIndexingState(0, $index_id);
-	return;
+	SetProcessState($index_id, $process_number, 0);	
+	die( "No documents processed, quitting now.. \n" );
 }
 
 # start prefix creation
 SetIndexingState(2, $index_id);
 
 # create prefixes
-require_once("prefix_composer.php");
+if ( !empty($mysql_data_dir) )
+{
+	$sort_directory = $mysql_data_dir; # custom directory
+	$tmp_sort_dir = "--temporary-directory=$mysql_data_dir";
+}
+else
+{
+	$sort_directory = realpath(dirname(__FILE__));
+	$tmp_sort_dir = "";
+}
+
+for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
+{
+	$filepath = $sort_directory . "/pretemp_".$index_id."_".$i.".txt";
+	$filepath_sorted =  $sort_directory . "/pretemp_".$index_id."_sorted.txt";
+	@unlink($filepath); # remove existing file ( just to be sure ) 
+	@unlink($filepath_sorted); # remove existing file ( just to be sure ) 
+}
+
+require_once("prefix_composer_ext.php");
 
 # update indexing state
-SetIndexingState(5, $index_id);
+SetIndexingState(4, $index_id);
 
-/*
-	Now it is the time to handle temporary data! 
-*/
+$filepath_sorted =  $sort_directory . "/pretemp_".$index_id."_sorted.txt";
+$all_filepaths = "";
+
+# sort the external data files
+$sort_start = microtime(true);
+for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
+{
+	#echo "Sorting temporary prefix data for process_number $i \n";
+	$filepath = $sort_directory . "/pretemp_".$index_id."_".$i.".txt";
+	$all_filepaths .= $filepath . " ";
+}
+
+echo "Starting to sort prefix data \n";
+exec("LC_ALL=C sort $tmp_sort_dir -k1,1 $all_filepaths > $filepath_sorted");
+
+for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
+{
+	$filepath = $sort_directory . "/pretemp_".$index_id."_".$i.".txt";
+	@unlink($filepath); # remove the unsorted file
+}
+
+$sort_end = microtime(true)-$sort_start;
+echo "Sorting temporary prefix data took $sort_end seconds \n";
+
+$interval = microtime(true) - $timer;
+echo "\nNow all processes are completed\nDocinfo time: $docinfo_extra_time \n\n";
 
 try
 {
 	# update indexing status accordingly ( + set the indexing permission ) 
 	$connection->query("UPDATE PMBIndexes SET 
-						indexing_permission = 1, 
-						temp_loads = 0, 
+						current_state = 3, 
+						indexing_permission = 1,  
 						temp_loads_left = 0
 						WHERE ID = $index_id");
 	
 	$key_start = microtime(true);
-	echo "Enabling keys for temporary tables...\n";
-	
-
-	# before anything else, build indexes for temporary tables
-	$connection->exec("ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;
-					   ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;");
-	
-	$key_end = microtime(true) - $key_start;					
-	echo "Enabling keys took: $key_end seconds \n";					
+	echo "Enabling keys for PMBDocinfo table...\n";
+	$connection->exec("ALTER TABLE PMBDocinfo$index_suffix ENABLE KEYS;");
+	$key_end = microtime(true) - $key_start;	
+	echo "Enabling keys took: $key_end seconds \n";				
 	
 	# precache table index
 	$connection->query("LOAD INDEX INTO CACHE PMBtoktemp$index_suffix;");
-	$connection->query("LOAD INDEX INTO CACHE PMBdatatemp$index_suffix;");
-						
-	# get count of token position data entries
-	$dcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBdatatemp$index_suffix");
-	$total_rows = $dcountpdo->fetchColumn();
-	
-	$pcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBpretemp$index_suffix");
-	$total_rows += $pcountpdo->fetchColumn();
 
 	# update indexing status accordingly ( + set the indexing permission ) 
-	$connection->query("UPDATE PMBIndexes SET
+	$connection->query("UPDATE PMBIndexes SET current_state = 3, 
 						indexing_permission = 1, 
-						temp_loads = temp_loads + $total_rows, 
 						temp_loads_left = 0 
 						WHERE ID = $index_id");
 
@@ -1519,41 +1542,81 @@ catch ( PDOException $e )
 	echo $e->getMessage();	
 }
 
-
-
 $interval = microtime(true) - $timer;
 echo "----------------------------------------\nReading and tokenizing data took $interval seconds\n----------------------------------------------\n\nWaiting for tokens....\n";
+
+# update indexing state
+SetIndexingState(5, $index_id);
+
+$all_filepaths = "";
+# open the process specific file
+if ( !empty($mysql_data_dir) )
+{
+	$sort_directory = $mysql_data_dir; # custom directory
+	$tmp_sort_dir = "--temporary-directory=$mysql_data_dir";
+}
+else
+{
+	$sort_directory = realpath(dirname(__FILE__));
+	$tmp_sort_dir = "";
+}
+
+$filepath_sorted =  $sort_directory . "/datatemp_".$index_id."_sorted.txt";
+@unlink($filepath_sorted);
+		
+
+$all_filepaths = $sort_directory . "/datatemp_".$index_id."_0.txt";
+
+	
+# sort the external data files
+$sort_start = microtime(true);
+exec("LC_ALL=C sort $tmp_sort_dir -k1,1 -k2,2 $all_filepaths > $filepath_sorted");
+$sort_end = microtime(true)-$sort_start;
+echo "Sorting temporary match data took $sort_end seconds \n";
+
+@unlink($all_filepaths);
+
+# reset temporary variables
+try
+{
+	$connection->query("UPDATE PMBIndexes SET 
+						current_state = 3, 
+						temp_loads_left = 0,
+						temp_loads = temp_loads + $data_rows
+						WHERE ID = $index_id ");
+}
+catch ( PDOException $e ) 
+{
+	echo "An error occurred when updating statistics: " . $e->getMessage() . "\n";
+}
 
 # update indexing state
 SetIndexingState(3, $index_id);
 
 # run token compressor
 if ( $clean_slate )
-{
-	require_once("token_compressor.php");
+{	
+	require_once("token_compressor_ext.php");
 }
 else
 {
-	require_once("token_compressor_merger.php");
+	require_once("token_compressor_merger_ext.php");
 }
 
-$tokens_end = microtime(true) - $tokens_start;
-
-# rum prefix compressor
-if ( $clean_slate ) 
+# run prefix compressor
+if ( $clean_slate )
 {
-	require_once("prefix_compressor.php");
+	require_once("prefix_compressor_ext.php");
 }
 else
 {
-	require_once("prefix_compressor_merger.php");
+	require_once("prefix_compressor_merger_ext.php");
 }
 
-
-$timer_end = microtime(true) - $timer;
-echo "The whole operation took $timer_end seconds \n";
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
+$timer_end = microtime(true) - $timer;
+echo "The whole operation took $timer_end seconds \n";
 
 # reset temporary variables
 try
@@ -1571,6 +1634,5 @@ catch ( PDOException $e )
 
 # update current indexing state to false ( 0 ) 
 SetIndexingState(0, $index_id);
-
-
+SetProcessState($index_id, $process_number, 0);	
 ?>

@@ -1006,17 +1006,22 @@ if ( $documents === 0 )
 	die( "No documents processed, quitting now.. \n" );
 }
 
+# start prefix creation
+SetIndexingState(2, $index_id);
+
 # create prefixes
 require_once("prefix_composer.php");
 
 $interval = microtime(true) - $timer;
 echo "\nNow all processes are completed\nDocinfo time: $docinfo_extra_time \n\n";
 
+# update indexing state
+SetIndexingState(5, $index_id);
+
 try
 {
 	# update indexing status accordingly ( + set the indexing permission ) 
 	$connection->query("UPDATE PMBIndexes SET 
-						current_state = 3, 
 						indexing_permission = 1, 
 						temp_loads = 0, 
 						temp_loads_left = 0
@@ -1045,10 +1050,8 @@ try
 	$pcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBpretemp$index_suffix");
 	$total_rows += $pcountpdo->fetchColumn();
 	
-	#echo "dist_threads: $dist_threads - total rows: $total_rows \n";
-
 	# update indexing status accordingly ( + set the indexing permission ) 
-	$connection->query("UPDATE PMBIndexes SET current_state = 3, 
+	$connection->query("UPDATE PMBIndexes SET
 						indexing_permission = 1, 
 						temp_loads = temp_loads + $total_rows, 
 						temp_loads_left = 0 
@@ -1064,6 +1067,9 @@ catch ( PDOException $e )
 
 $interval = microtime(true) - $timer;
 echo "----------------------------------------\nReading and tokenizing data took $interval seconds\n----------------------------------------------\n\nWaiting for tokens....\n";
+
+# update indexing state
+SetIndexingState(3, $index_id);
 
 # run token compressor
 if ( $clean_slate )

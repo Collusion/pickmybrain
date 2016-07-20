@@ -351,7 +351,7 @@ try
 		$min_token		= $token;
 		
 		# check premissions every 10000th row
-		if ( $counter % 10000 === 0 ) 
+		if ( $counter >= 10000 ) 
 		{
 			$statistic_start = microtime(true);
 			# check indexing permission

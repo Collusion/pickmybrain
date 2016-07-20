@@ -143,9 +143,6 @@ try
 	
 	if ( $process_number === 0 ) 
 	{
-		$fp = fopen("/var/www/localsearch/error.txt", "w");
-		fclose($fp);
-		
 		$ind_state = $connection->query("SELECT current_state, updated, documents FROM PMBIndexes WHERE ID = $index_id");
 		
 		if ( $row = $ind_state->fetch(PDO::FETCH_ASSOC) )
@@ -175,7 +172,11 @@ try
 		SetIndexingState(1, $index_id);
 		
 		# update statistics
-		$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP(), comment = '' WHERE ID = ?");
+		$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP(), 
+																comment = '',
+																temp_loads  = 0,
+																temp_loads_left = 0
+																WHERE ID = ?");
 		$upd_state->execute(array($index_id));
 	}
 	
@@ -452,6 +453,7 @@ $toktemp_total_insert = 0;
 
 try
 {
+$data_rows = 0;
 $skipped = 0;
 $fetched = 0;
 $breakpoint = 0;
@@ -699,7 +701,6 @@ while ( true )
 		}
 	}
 
-	#$token_pairs = array();
 	$tokens = array();
 	
 	foreach ( $fields as $field_id => $field ) 
@@ -730,13 +731,13 @@ while ( true )
 		$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
 		
 		$insert_buffer .= sprintf("%12X %8X", ($crc32<<16)|$tid, $document_id)."$string\n";
+		++$data_rows;
 	}
 	
 	unset($tokens);
 	
 	try
 	{
-		# $document_attrs["attr_$column_name"] = $column_value; 
 		$columns = array();
 		$updates = array();
 	
@@ -917,6 +918,10 @@ try
 							documents = documents + $awaiting_writes
 							WHERE ID = $index_id");
 	}
+	
+	$connection->query("UPDATE PMBIndexes SET
+						temp_loads_left = temp_loads_left + $data_rows
+						WHERE ID = $index_id");
 }
 catch ( PDOException $e ) 
 {
@@ -957,7 +962,8 @@ if ( $documents === 0 )
 	die( "No documents processed, quitting now.. \n" );
 }
 
-# create prefixes
+# start prefix creation
+SetIndexingState(2, $index_id);
 
 if ( !empty($mysql_data_dir) )
 {
@@ -979,6 +985,9 @@ for ( $i = 0 ; $i < $dist_threads ; ++$i )
 }
 
 require_once("prefix_composer_ext.php");
+
+# update indexing state
+SetIndexingState(4, $index_id);
 
 $filepath_sorted =  $sort_directory . "/pretemp_".$index_id."_sorted.txt";
 $all_filepaths = "";
@@ -1012,9 +1021,8 @@ try
 {
 	# update indexing status accordingly ( + set the indexing permission ) 
 	$connection->query("UPDATE PMBIndexes SET 
-						current_state = 3, 
-						indexing_permission = 1, 
-						temp_loads = 0, 
+						indexing_permission = 1,
+						temp_loads = temp_loads_left, 
 						temp_loads_left = 0
 						WHERE ID = $index_id");
 	
@@ -1025,26 +1033,7 @@ try
 	echo "Enabling keys took: $key_end seconds \n";				
 	
 	# precache table index
-	$connection->query("LOAD INDEX INTO CACHE PMBtoktemp$index_suffix;");
-
-						
-	# get count of token position data entries
-	#$dcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBdatatemp$index_suffix");
-	#$total_rows = $dcountpdo->fetchColumn();
-	
-	#$pcountpdo = $connection->query("SELECT COUNT(checksum) FROM PMBpretemp$index_suffix");
-	#$total_rows += $pcountpdo->fetchColumn();
-	
-	#echo "dist_threads: $dist_threads - total rows: $total_rows \n";
-
-	# update indexing status accordingly ( + set the indexing permission ) 
-	$connection->query("UPDATE PMBIndexes SET current_state = 3, 
-						indexing_permission = 1, 
-						temp_loads = temp_loads + 0, 
-						temp_loads_left = 0 
-						WHERE ID = $index_id");
-
-	
+	$connection->query("LOAD INDEX INTO CACHE PMBtoktemp$index_suffix;");	
 }
 catch ( PDOException $e ) 
 {
@@ -1054,6 +1043,9 @@ catch ( PDOException $e )
 
 $interval = microtime(true) - $timer;
 echo "----------------------------------------\nReading and tokenizing data took $interval seconds\n----------------------------------------------\n\nWaiting for tokens....\n";
+
+# update indexing state
+SetIndexingState(5, $index_id);
 
 $all_filepaths = "";
 # open the process specific file
@@ -1073,7 +1065,6 @@ $filepath_sorted =  $sort_directory . "/datatemp_".$index_id."_sorted.txt";
 		
 for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
 {
-	#echo "Sorting temporary prefix data for process_number $i \n";
 	$filepath = $sort_directory . "/datatemp_".$index_id."_".$i.".txt";
 	$all_filepaths .= $filepath . " ";
 }
@@ -1083,6 +1074,15 @@ $sort_start = microtime(true);
 exec("LC_ALL=C sort $tmp_sort_dir -k1,1 -k2,2 $all_filepaths > $filepath_sorted");
 $sort_end = microtime(true)-$sort_start;
 echo "Sorting temporary match data took $sort_end seconds \n";
+
+for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
+{
+	$filepath = $sort_directory . "/datatemp_".$index_id."_".$i.".txt";
+	@unlink($filepath); # remove the unsorted file
+}
+
+# update indexing state
+SetIndexingState(3, $index_id);
 
 # run token compressor
 if ( $clean_slate )

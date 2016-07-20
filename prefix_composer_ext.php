@@ -109,8 +109,6 @@ try
 	$total_insert_time = 0;
 	$scale = (int)(($max_temp_id-$min_dictionary_id) / $dist_threads); # count of tokens per process
 	$start_id = $process_number * $scale + $min_dictionary_id;
-	$min_id = $start_id;
-	$max_id = $min_id + $scale;
 	
 	$where_sql = "LIMIT $start_id, $scale";
 
@@ -127,9 +125,8 @@ try
 
 	$maximum_prefix_len 	= 20;
 	$insert_prefix_sql 		= "";
-	
-	file_put_contents("/var/www/localsearch/error.txt", "\r\nprefix_composert start: ($process_number) start_id: $start_id scale: $scale", FILE_APPEND);
 
+	$data_rows = 0;
 	$s = 0;
 	$x = 1;
 	$pr = 0;
@@ -254,6 +251,7 @@ try
 			foreach ( $write_buffer as $checksum => $tokdata ) 
 			{
 				$write_buf .= sprintf("%8X", $checksum)."$tokdata\n";
+				++$data_rows;
 			}
 						
 			fwrite($f, $write_buf);
@@ -281,6 +279,7 @@ try
 		foreach ( $write_buffer as $checksum => $tokdata ) 
 		{
 			$write_buf .= sprintf("%8X", $checksum)."$tokdata\n";
+			++$data_rows;
 		}
 					
 		fwrite($f, $write_buf);
@@ -294,6 +293,10 @@ try
 		$log .= "prefix inserts ok \n";
 		$loop_log .= "prefix inserts ok \n";
 	}
+	
+	$connection->query("UPDATE PMBIndexes SET
+						temp_loads_left = temp_loads_left + $data_rows
+						WHERE ID = $index_id");
 }
 catch ( PDOException $e ) 
 {
@@ -302,8 +305,6 @@ catch ( PDOException $e )
 }
 
 fclose($f);
-
-file_put_contents("/var/www/localsearch/error.txt", "\r\nSQL: $where_sql Total tokens: $token_total_count Total prefixes: $prefix_total_count ($process_number)", FILE_APPEND);
 
 # wait for another processes to finish
 require("process_listener.php");

@@ -69,6 +69,7 @@ if ( $process_number === 0 )
 		
 	}
 	
+	$data_partition = $data_partitions[0];
 	/* DATA PORTITION SEEKER */
 }
 

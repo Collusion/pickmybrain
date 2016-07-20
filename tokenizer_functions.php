@@ -1782,24 +1782,33 @@ function shutdown($index_id, $process_number = 0)
 
 function SetIndexingState($state, $index_id)
 {
-	if ( !is_numeric($state) || $state > 1 || $state < 0 )
+	if ( !is_numeric($state) || $state > 6 || $state < 0 )
 	{
 		return 0;
+	}
+	
+	if ( !$state )
+	{
+		$indexing_permission = 0;
+	}
+	else
+	{
+		$indexing_permission = 1;
 	}
 	
 	$connection = db_connection();
 	
 	try
 	{
-		$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, indexing_permission = ?, updated = UNIX_TIMESTAMP() WHERE ID = ?");
-		$perm->execute(array($state, $state, $index_id));
+		$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, indexing_permission = $indexing_permission, updated = UNIX_TIMESTAMP() WHERE ID = ?");
+		$perm->execute(array($state, $index_id));
 	}
 	catch ( PDOException $e ) 
 	{
 		try
 		{
-			$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, indexing_permission = ?, updated = UNIX_TIMESTAMP() WHERE ID = ?");
-			$perm->execute(array($state, $state, $index_id));
+			$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, indexing_permission = $indexing_permission, updated = UNIX_TIMESTAMP() WHERE ID = ?");
+			$perm->execute(array($state, $index_id));
 		}
 		catch ( PDOException $e ) 
 		{

@@ -22,7 +22,14 @@ $enable_ext_sorting = isSortSupported();
 # web crawler
 if ( $index_type == 1 ) 
 {
-	require_once("web_tokenizer.php");
+	if ( $enable_exec && $enable_ext_sorting )
+	{
+		require_once("web_tokenizer_ext.php");
+	}
+	else
+	{
+		require_once("web_tokenizer.php");
+	}
 }
 # database index
 else if ( $index_type == 2 ) 

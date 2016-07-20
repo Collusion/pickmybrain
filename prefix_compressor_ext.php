@@ -60,8 +60,6 @@ if ( $dist_threads > 1 && $process_number === 0  )
 			execWithCurl($url_to_exec);
 		}
 	}
-	
-	$data_partition = $data_partitions[0];
 }
 
 if ( $process_number !== 0 ) 
@@ -234,7 +232,7 @@ try
 			}
 		}
 		
-		if ( $rowcounter % 10000 === 0 ) 
+		if ( $rowcounter >= 10000 ) 
 		{
 			$statistic_start = microtime(true);
 			
@@ -262,6 +260,7 @@ try
 			$connection->query("UPDATE PMBIndexes SET temp_loads_left = temp_loads_left + $rowcounter WHERE ID = $index_id");
 			
 			$statistic_total_time += microtime(true)-$statistic_start;
+			$rowcounter = 0;
 		}
 	}
 	

@@ -154,9 +154,7 @@ try
 	ob_start();
 	var_dump($dialect_find);
 	$res = ob_get_clean();
-	
-	file_put_contents("/var/www/localsearch/error2.txt", "\r\ndialect: $res ($process_number)", FILE_APPEND);
-	
+
 	# create an another connection 
 	$unbuffered_connection = db_connection(false);
 
@@ -257,9 +255,6 @@ try
 			$loop_log .= "prefix inserts ok \n";
 		}	
 	}
-	
-	#$pdo->closeCursor();
-	#unset($pdo);
 
 	# insert rest of the prefixes, if available
 	# if we have over 2000 prefixes already, insert them here and reset 
@@ -269,7 +264,6 @@ try
 		$ins_start = microtime(true);
 		$updpdo = $connection->query("INSERT INTO PMBpretemp$index_suffix (checksum, token_checksum, cutlen) VALUES $insert_prefix_sql");
 		$total_insert_time += (microtime(true) - $ins_start);
-		file_put_contents("/var/www/localsearch/error2.txt", "\r\nLast prefixes count: $pr ($process_number)", FILE_APPEND);
 		
 		$prefix_total_count += $pr;	
 		# reset variables
@@ -283,10 +277,7 @@ catch ( PDOException $e )
 {
 	echo "error during composing prefixes: ";
 	echo $e->getMessage();
-	file_put_contents("/var/www/localsearch/error2.txt", "\r\nERROR:".$e->getMessage()." ($process_number)", FILE_APPEND);
 }
-
-file_put_contents("/var/www/localsearch/error2.txt", "\r\nMode: $prefix_mode Minlen: $prefix_length SQL: $where_sql Total tokens: $token_total_count Total prefixes: $prefix_total_count ($process_number)", FILE_APPEND);
 
 # wait for another processes to finish
 require("process_listener.php");
@@ -297,6 +288,9 @@ echo "All prefix processes have now finished, $interval seconds elapsed, enablin
 
 try
 {
+	# update indexing state
+	SetIndexingState(4, $index_id);
+	
 	# now, enable keys for the prefix table
 	if ( $max_temp_id > $min_dictionary_id + 1000 ) 
 	{

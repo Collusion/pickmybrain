@@ -60,8 +60,6 @@ if ( $dist_threads > 1 && $process_number === 0  )
 			execWithCurl($url_to_exec);
 		}
 	}
-	
-	$data_partition = $data_partitions[0];
 }
 
 if ( $process_number !== 0 ) 
@@ -550,7 +548,7 @@ else
 	$sorted_dir = realpath(dirname(__FILE__));
 }
 $filepath = $directory."/datatemp".$index_suffix."_sorted.txt";
-@unlink($filepath);
+#@unlink($filepath);
 
 echo "Inserting tokens into temp tables took $token_insert_time seconds \n";
 echo "Updating statistics took $statistic_total_time seconds \n";

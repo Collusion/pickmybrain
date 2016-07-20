@@ -289,7 +289,7 @@ try
 		
 		$min_checksum 		= $checksum;
 		
-		if ( $rowcounter % 10000 === 0 ) 
+		if ( $rowcounter >= 10000 ) 
 		{
 			$statistic_start = microtime(true);
 			
@@ -318,10 +318,9 @@ try
 			$connection->query("UPDATE PMBIndexes SET temp_loads_left = temp_loads_left + $rowcounter WHERE ID = $index_id");
 			
 			$statistic_total_time += microtime(true)-$statistic_start;
+			$rowcounter = 0;
 		}
 	}
-	
-	echo "$rowcounter rows fetched \n";
 
 	# rest of the old data ( if availabe ) 
 	while ( $oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC) )

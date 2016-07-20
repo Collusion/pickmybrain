@@ -60,8 +60,6 @@ if ( $dist_threads > 1 && $process_number === 0  )
 			execWithCurl($url_to_exec);
 		}
 	}
-	
-	$data_partition = $data_partitions[0];
 }
 
 if ( $process_number !== 0 ) 
@@ -294,7 +292,7 @@ try
 		
 		$min_checksum 		= $checksum;
 		
-		if ( $rowcounter % 10000 === 0 ) 
+		if ( $rowcounter >= 10000 ) 
 		{
 			$statistic_start = microtime(true);
 			
@@ -323,10 +321,10 @@ try
 			$connection->query("UPDATE PMBIndexes SET temp_loads_left = temp_loads_left + $rowcounter WHERE ID = $index_id");
 			
 			$statistic_total_time += microtime(true)-$statistic_start;
+			$rowcounter = 0;
 		}
 	}
-	
-	echo "$rowcounter rows fetched \n";
+
 	$oldcount = 0;
 	# rest of the old data ( if availabe ) 
 	while ( $oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC) )
@@ -356,8 +354,6 @@ try
 			}
 		}
 	}
-	
-	file_put_contents("/var/www/localsearch/error.txt", "\r\nprefix_composer end ($process_number): rowcounter: $rowcounter oldcount: $oldcount ", FILE_APPEND);
 	
 	if ( !empty($temp_sql) )
 	{

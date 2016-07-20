@@ -1019,11 +1019,9 @@ try
 			$delete_button = "<input style='float:right;' type='submit' value='Delete index' name='delete_index' onClick='return confirm(\"Are you sure you want to permanently delete the whole search index?\");' />";
 		}
 
-		# ID 	name 	type 	comment 	documents 	updated 	indexing_permission 	current_state 	temp_loads 	temp_loads_left
 		$statistic[5] = $row["temp_loads"];
 		$statistic[6] = $row["updated"];
 		$statistic[7] = $row["temp_loads_left"];
-		#$statistic[8] = $row["indexing_started"];
 		$indexing_time = "";
 		if ( !empty($row["indexing_started"]) )
 		{
@@ -1071,8 +1069,8 @@ try
 	else if ( $indexing_state === 2 ) 
 	{
 		# indexer is running, show doc count etc
-		$state = "Rebuilding prefixes, " . $statistic[5] . " tokens out of " . $statistic[7] . " processed";		
-		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Stop rebuilder' name='stop_rebuilder' onClick='return confirm(\"Rebuilder will be stopped. Continue?\");' />";
+		$state = "Building prefixes";		
+		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Stop rebuilder' name='stop_rebuilder' onClick='return confirm(\"Indexer will be stopped. Continue?\");' />";
 		
 	}
 	# compressing index
@@ -1088,6 +1086,16 @@ try
 		}
 		$state = "Compressing index, $done% done";
 		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped. Continue?\");' />";		
+	}
+	else if ( $indexing_state === 4 ) 
+	{
+		$state = "Sorting temporary prefix data";
+		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped after sorting is done. Continue?\");' />";	
+	}
+	else if ( $indexing_state === 5 ) 
+	{
+		$state = "Sorting temporary match data";
+		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped after sorting is done. Continue?\");' />";	
 	}
 	# idle state
 	else
