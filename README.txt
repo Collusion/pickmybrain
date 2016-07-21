@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   0.91 BETA 
-Published: 20.07.2016
+Version:   0.92 BETA 
+Published: 22.07.2016
 
 copyright 2015-2016 Henri Ruutinen 
 
@@ -137,6 +137,9 @@ extra parameters (optional):
 	testmode ( checks index configuration for errors )
 	
 	purge	 ( removes all existing indexed data from current index )
+
+	replace  ( keeps the old indexed data intact until the new indexer
+		   run is 100% completed ) 
 
 OR
 
