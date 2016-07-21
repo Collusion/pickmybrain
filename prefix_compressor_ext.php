@@ -108,7 +108,7 @@ try
 	{
 		$clean_slate_target = "PMBPrefixes$index_suffix";
 
-		if ( $clean_slate ) 
+		if ( $clean_slate && empty($replace_index) ) 
 		{
 			$target_table = "PMBPrefixes$index_suffix";
 		}
@@ -324,7 +324,6 @@ try
 			{
 				$ins_sql[0] = " ";
 				$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
-				#$inspdo->execute($escape);
 				$ins_sql = "";
 				$w = 0;
 				++$insert_counter;
@@ -348,7 +347,6 @@ try
 		{
 			$ins_sql[0] = " ";
 			$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
-			#$inspdo->execute($escape);
 			$ins_sql = "";
 			$insert_counter = 0;
 		}
@@ -359,7 +357,7 @@ try
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring data into one table took $transfer_time_end seconds \n";
 	
-	if ( !$clean_slate ) 
+	if ( !$clean_slate && empty($replace_index) ) 
 	{
 		$drop_start = microtime(true);
 		$connection->beginTransaction();

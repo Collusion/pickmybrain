@@ -42,7 +42,7 @@ try
 			 PRIMARY KEY (ID,type,documents,current_state,updated,indexing_permission),
 			 UNIQUE KEY name (name),
 			 UNIQUE KEY ID (ID)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+			) ENGINE=MYISAM DEFAULT CHARSET=utf8");
 	}
 	
 }

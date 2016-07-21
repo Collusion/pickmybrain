@@ -47,6 +47,14 @@ if ( $dialect_processing )
 # launch sister processes here if multiprocessing is turned on! 
 if ( $dist_threads > 1 && $process_number === 0  ) 
 {	
+	$cmd = "";
+	$curl = "";
+	if ( !empty($replace_index) )
+	{
+		$cmd = "replace";
+		$curl = "&replace=1";
+	}
+
 	# launch sister-processes
 	for ( $x = 1 ; $x < $dist_threads ; ++$x ) 
 	{
@@ -54,12 +62,12 @@ if ( $dist_threads > 1 && $process_number === 0  )
 		if ( $enable_exec )
 		{
 			# launch via exec()	
-			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x");
+			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x $cmd");
 		}
 		else
 		{
 			# launch via async curl
-			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x";
+			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x".$curl;
 			execWithCurl($url_to_exec);
 		}
 	}
@@ -87,7 +95,7 @@ try
 	$temppdo = $connection->query("SELECT COUNT(token) FROM PMBtoktemp$index_suffix");
 	$max_temp_id = $temppdo->fetchColumn();
 	
-	if ( !$min_dictionary_id ) 
+	if ( !$min_dictionary_id || !empty($replace_index) ) 
 	{
 		$min_dictionary_id = 0;
 	}

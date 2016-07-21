@@ -142,10 +142,7 @@ try
 	$clean_slate = true;
 	
 	if ( $process_number === 0 ) 
-	{
-		$fp = fopen("/var/www/localsearch/error.txt", "w");
-		fclose($fp);
-		
+	{		
 		$ind_state = $connection->query("SELECT current_state, updated, documents FROM PMBIndexes WHERE ID = $index_id");
 		
 		if ( $row = $ind_state->fetch(PDO::FETCH_ASSOC) )
@@ -165,6 +162,12 @@ try
 			{
 				$clean_slate = false;
 			}
+			else
+			{
+				# if index replacing is enabled
+				# it can be disabled to save some tome
+				unset($replace_index);
+			}
 		}
 		else
 		{
@@ -177,6 +180,38 @@ try
 		# update statistics
 		$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP(), comment = '' WHERE ID = ?");
 		$upd_state->execute(array($index_id));
+		
+		$data_dir_sql = "";
+		if ( !empty($mysql_data_dir) )
+		{
+			$data_dir_sql = "DATA DIRECTORY = '$mysql_data_dir' INDEX DIRECTORY = '$mysql_data_dir'";
+		}
+		
+		$min_doc_id = 0;
+		if ( isset($purge_index) )
+		{
+			$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix;
+							   UPDATE PMBIndexes SET documents = 0 WHERE ID = $index_id;");
+		}
+		else
+		{
+			if ( !empty($replace_index) )
+			{
+				$connection->exec("DROP TABLE IF EXISTS PMBDocinfo".$index_suffix."_temp;
+							CREATE TABLE IF NOT EXISTS PMBDocinfo".$index_suffix."_temp (
+							 ID int(11) unsigned NOT NULL,
+							 avgsentiscore tinyint(4) NOT NULL,
+							 PRIMARY KEY (ID),
+							 KEY avgsentiscore (avgsentiscore)	
+							) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql");	
+			}
+			
+			$idpdo = $connection->query("SELECT MAX(ID) FROM PMBDocinfo$index_suffix");
+			if ( $val = $idpdo->fetchColumn() )
+			{
+				$min_doc_id = (int)$val+1;
+			}
+		}
 	}
 	
 	if ( isset($purge_index) )
@@ -205,24 +240,27 @@ try
 			return;
 		}
 	}
-	
-	$min_doc_id = 0;
-	if ( isset($purge_index) )
+
+	if ( $process_number > 0 )
 	{
-		$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix;
-						   UPDATE PMBIndexes SET documents = 0 WHERE ID = $index_id;");
-	}
-	else
-	{
-		$idpdo = $connection->query("SELECT MAX(ID) FROM PMBDocinfo$index_suffix");
-		if ( $val = $idpdo->fetchColumn() )
+		if ( !empty($data_partition) )
 		{
-			$min_doc_id = (int)$val+1;
+			$min_doc_id = (int)$data_partition[0];
+		}
+		else
+		{
+			$min_doc_id = 0;
 		}
 	}
-	
-	$connection->exec("ALTER TABLE PMBDocinfo$index_suffix DISABLE KEYS;");
-	
+		
+	$docinfo_target_table = "PMBDocinfo$index_suffix";
+	if ( !empty($replace_index) )
+	{
+		$docinfo_target_table = "PMBDocinfo".$index_suffix."_temp";
+		$clean_slate = true;
+		$min_doc_id = 0;
+	}
+		
 	$senti_sql_column = "";
 	$senti_sql_index_column = "";
 	
@@ -243,12 +281,6 @@ try
 		# truncate and create temporary tables
 		if ( !$test_mode )
 		{
-			$data_dir_sql = "";
-			if ( !empty($mysql_data_dir) )
-			{
-				$data_dir_sql = "DATA DIRECTORY = '$mysql_data_dir' INDEX DIRECTORY = '$mysql_data_dir'";
-			}
-			
 			$temporary_table_type = "ENGINE=MYISAM DEFAULT CHARSET=utf8 ROW_FORMAT=FIXED $data_dir_sql";
 
 			$connection->exec("DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
@@ -271,11 +303,14 @@ try
 								) $temporary_table_type PACK_KEYS=1");
 			
 			if ( $clean_slate || isset($purge_index) ) 
-			{				
-				$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
+			{	
+				if ( empty($replace_index) )
+				{		
+					$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
 									TRUNCATE TABLE PMBPrefixes$index_suffix;
 									ALTER TABLE PMBTokens$index_suffix ENGINE=INNODB $innodb_row_format_sql;
 									ALTER TABLE PMBPrefixes$index_suffix ENGINE=INNODB $innodb_row_format_sql");
+				}
 				
 				# create new temporary tables	  KEY checksum (checksum,minichecksum,ID)	   
 				$connection->exec("DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
@@ -329,7 +364,7 @@ if ( $process_number === 0 )
 	{
 		# 1. step, insert a random empty row into the PMBDocinfo-table 
 		# all the extra attributes will have default values, so this will be OK
-		$preinsert = $connection->query("INSERT INTO PMBDocinfo$index_suffix () VALUES()");
+		$preinsert = $connection->query("INSERT INTO $docinfo_target_table () VALUES()");
 		
 		$last_insert_id = $connection->lastInsertId();
 		
@@ -337,7 +372,7 @@ if ( $process_number === 0 )
 		# internal attributes will start like attr_[column_name] ( to prevent duplicates ) 
 		# remove columns ( alter table ) that are not present in main_sql_attrs
 		# add columns ( alter table )  that are defined on main_sql_attrs but not present in the table
-		$precheck = $connection->query("SELECT * FROM PMBDocinfo$index_suffix WHERE ID = $last_insert_id");
+		$precheck = $connection->query("SELECT * FROM $docinfo_target_table WHERE ID = $last_insert_id");
 		
 		if ( $row = $precheck->fetch(PDO::FETCH_ASSOC) )
 		{
@@ -371,9 +406,9 @@ if ( $process_number === 0 )
 			# execute modifications
 			if ( !empty($alter_operations) )
 			{
-				$connection->query("ALTER TABLE PMBDocinfo$index_suffix " . implode(", ", $alter_operations));
+				$connection->query("ALTER TABLE $docinfo_target_table " . implode(", ", $alter_operations));
 				
-				echo "alter table query: " . "ALTER TABLE PMBDocinfo$index_suffix " . implode(", ", $alter_operations) . "\n";
+				echo "alter table query: " . "ALTER TABLE $docinfo_target_table " . implode(", ", $alter_operations) . "\n";
 			}
 			else
 			{
@@ -382,7 +417,10 @@ if ( $process_number === 0 )
 		}
 		
 		# finally, remove the added row
-		$connection->query("DELETE FROM PMBDocinfo$index_suffix WHERE ID = $last_insert_id");
+		$connection->query("DELETE FROM $docinfo_target_table WHERE ID = $last_insert_id");
+		
+		# disable keys
+		$connection->exec("ALTER TABLE $docinfo_target_table DISABLE KEYS;");
 		
 	}
 	catch ( PDOException $e ) 
@@ -395,6 +433,14 @@ if ( $process_number === 0 )
 
 if ( $dist_threads > 1 && $process_number === 0 )
 {
+	$cmd = "";
+	$curl = "";
+	if ( !empty($replace_index) )
+	{
+		$cmd = "replace";
+		$curl = "&replace=1";
+	}
+	
 	# launch sister-processes
 	for ( $x = 1 ; $x < $dist_threads ; ++$x ) 
 	{
@@ -402,12 +448,12 @@ if ( $dist_threads > 1 && $process_number === 0 )
 		if ( $enable_exec )
 		{
 			# launch via exec()	
-			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x");
+			execInBackground("php " . __FILE__ . " index_id=$index_id process_number=$x data_partition=$min_doc_id $cmd");
 		}
 		else
 		{
 			# launch via async curl
-			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x";
+			$url_to_exec = "http://localhost" . str_replace($document_root, "", __FILE__ ) . "?index_id=$index_id&process_number=$x&data_partition=$min_doc_id".$curl;
 			execWithCurl($url_to_exec);
 		}
 	}
@@ -421,7 +467,7 @@ $main_sql_query = str_replace(array("\n", "\r", "\t"), " ", $main_sql_query);
 $original_main_sql_query = $main_sql_query;
 $main_sql_query = ModifySQLQuery($original_main_sql_query, $dist_threads, $process_number, $min_doc_id, $ranged_query_value);
 
-#echo "SQL ($process_number) " . $main_sql_query . "\n\n";
+echo "SQL ($process_number) " . $main_sql_query . "\n\n";
 
 try
 {
@@ -816,16 +862,8 @@ while ( true )
 		
 			$docinfo_time_start = microtime(true);
 			$count = count($docinfo_value_sets);
-			$docpdo = $connection->query("INSERT INTO PMBDocinfo$index_suffix $docinfo_columns VALUES " . implode(",", $cescape) . "");	
+			$docpdo = $connection->query("INSERT INTO $docinfo_target_table $docinfo_columns VALUES " . implode(",", $cescape) . "");	
 			++$insert_counter;		
-			
-			/*
-			if ( $insert_counter >= $flush_interval )
-			{
-				$connection->commit();
-				$connection->beginTransaction();
-				$insert_counter = 0;
-			}*/
 
 			$log .= "docinfo ok \n";
 			$loop_log .= "docinfo ok \n";
@@ -937,7 +975,7 @@ try
 	{	
 		$docinfo_time_start = microtime(true);
 		$count = count($docinfo_value_sets);
-		$docpdo = $connection->query("INSERT INTO PMBDocinfo$index_suffix $docinfo_columns VALUES " . implode(",", $cescape) . "");												
+		$docpdo = $connection->query("INSERT INTO $docinfo_target_table $docinfo_columns VALUES " . implode(",", $cescape) . "");												
 		
 		$log .= "docinfo ok \n";
 		$loop_log .= "docinfo ok \n";
@@ -1035,7 +1073,7 @@ try
 	
 	$key_start = microtime(true);
 	echo "Enabling keys for PMBDocinfo table...\n";
-	$connection->exec("ALTER TABLE PMBDocinfo$index_suffix ENABLE KEYS;");
+	$connection->exec("ALTER TABLE $docinfo_target_table ENABLE KEYS;");
 	$key_end = microtime(true) - $key_start;	
 	echo "Enabling keys took: $key_end seconds \n";				
 	
@@ -1091,14 +1129,31 @@ else
 	require_once("prefix_compressor_merger.php");
 }
 
-echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
-echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
-$timer_end = microtime(true) - $timer;
-echo "The whole operation took $timer_end seconds \n";
-
 # reset temporary variables
 try
 {
+	if ( !empty($replace_index) )
+	{
+		$drop_start = microtime(true);
+		$connection->beginTransaction();
+		# delete old docinfo table and replace it with the new one
+		$connection->query("DROP TABLE PMBDocinfo$index_suffix");
+		$connection->query("ALTER TABLE $docinfo_target_table RENAME TO PMBDocinfo$index_suffix");
+		# delete old docinfo table and replace it with the new one
+		$connection->query("DROP TABLE PMBTokens$index_suffix");
+		$connection->query("ALTER TABLE PMBTokens".$index_suffix."_temp RENAME TO PMBTokens$index_suffix");
+		# delete old docinfo table and replace it with the new one
+		$connection->query("DROP TABLE PMBPrefixes$index_suffix");
+		$connection->query("ALTER TABLE PMBPrefixes".$index_suffix."_temp RENAME TO PMBPrefixes$index_suffix");
+		
+		$connection->query("UPDATE PMBIndexes SET documents = ( SELECT COUNT(ID) FROM PMBDocinfo$index_suffix ) WHERE ID = $index_id");
+		$connection->commit();
+		$drop_end = microtime(true) - $drop_start;
+		
+		echo "Replacing old tables with new ones took $drop_end seconds \n";
+	}
+	
+	
 	$connection->query("UPDATE PMBIndexes SET 
 						current_state = 0, 
 						temp_loads = 0, 
@@ -1107,8 +1162,15 @@ try
 }
 catch ( PDOException $e ) 
 {
-	echo "An error occurred when updating statistics: " . $e->getMessage() . "\n";
+	$connection->rollBack();
+	echo "An error occurred when switching tables : " . $e->getMessage() . "\n";
 }
+
+echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
+echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
+$timer_end = microtime(true) - $timer;
+echo "The whole operation took $timer_end seconds \n";
+
 
 # update current indexing state to false ( 0 ) 
 SetIndexingState(0, $index_id);

@@ -105,7 +105,7 @@ try
 	{
 		$clean_slate_target = "PMBTokens$index_suffix";
 
-		if ( $clean_slate ) 
+		if ( $clean_slate && empty($replace_index) ) 
 		{
 			$target_table = "PMBTokens$index_suffix";
 		}
@@ -490,7 +490,7 @@ try
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
 
-	if ( !$clean_slate )
+	if ( !$clean_slate && empty($replace_index) )
 	{
 		$drop_start = microtime(true);
 		$connection->beginTransaction();
@@ -500,6 +500,10 @@ try
 		
 		$connection->commit();
 		$drop_end = microtime(true) - $drop_start;
+	}
+	else
+	{
+		echo "Skipping table switching, because replace_index is ON \n";
 	}
 	
 }

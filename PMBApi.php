@@ -2257,7 +2257,12 @@ class PickMyBrain
 				while ( $row = $docpdo->fetch(PDO::FETCH_ASSOC) )
 				{
 					$row["content"] = $this->SearchFocuser($row["content"], $query, "fi", 40);
-					$this->result["matches"][(int)$row["doc_id"]] = $row;
+					
+					# merge with existing rows
+					foreach ( $row as $column => $column_value ) 
+					{
+						$this->result["matches"][(int)$row["doc_id"]][$column] = $column_value;
+					}
 				}	
 				
 				$this->result["stats"]["ext_docinfo_time"] = microtime(true)-$ext_docinfo_start;

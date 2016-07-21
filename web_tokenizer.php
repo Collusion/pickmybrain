@@ -158,12 +158,6 @@ try
 		die("Unknown index id $index_id");
 	}
 	
-	if ( isset($purge_index) )
-	{
-		$clean_slate = true;
-		$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix;
-						   UPDATE PMBIndexes SET documents = 0 WHERE ID = $index_id;");
-	}
 	
 	# update current indexing state to true ( 1 ) 
 	SetIndexingState(1, $index_id);
@@ -177,7 +171,44 @@ try
 		$data_dir_sql = "DATA DIRECTORY = '$mysql_data_dir' INDEX DIRECTORY = '$mysql_data_dir'";
 	}
 	
+	if ( isset($purge_index) )
+	{
+		$clean_slate = true;
+		$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix;
+							   UPDATE PMBIndexes SET documents = 0 WHERE ID = $index_id;");
+	}
+	else if ( !empty($replace_index) )
+	{
+		$connection->exec("DROP TABLE IF EXISTS PMBDocinfo".$index_suffix."_temp;
+							CREATE TABLE IF NOT EXISTS PMBDocinfo".$index_suffix."_temp (
+							 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
+							 URL varbinary(500) NOT NULL,
+							 url_checksum binary(16) NOT NULL,
+							 token_count varchar(60) NOT NULL,
+							 avgsentiscore tinyint(4) DEFAULT '0',
+							 attr_category tinyint(3) unsigned DEFAULT NULL,
+							 field0 varbinary(255) NOT NULL,
+							 field1 varbinary(10000) NOT NULL,
+							 field2 varbinary(255) NOT NULL,
+							 field3 varbinary(255) NOT NULL,
+							 attr_timestamp int(10) unsigned NOT NULL,
+							 checksum binary(16) NOT NULL,
+							 attr_domain int(10) unsigned NOT NULL,
+							 PRIMARY KEY (ID),
+							 KEY attr_category (attr_category),
+							 KEY url_checksum (url_checksum)
+							) ENGINE=INNODB DEFAULT CHARSET=utf8 $innodb_row_format_sql $data_dir_sql");	
+	}
+	
 	$temporary_table_type = "ENGINE=MYISAM DEFAULT CHARSET=utf8 ROW_FORMAT=FIXED $data_dir_sql";
+
+	# choose correct target table for document info
+	$docinfo_target_table = "PMBDocinfo$index_suffix";
+	if ( !empty($replace_index) )
+	{
+		$docinfo_target_table = "PMBDocinfo".$index_suffix."_temp";
+		$clean_slate = true;
+	}
 
 	$senti_sql_column = "";
 	$senti_sql_index_column = "";
@@ -207,11 +238,14 @@ try
 							) $temporary_table_type PACK_KEYS=1");
 			
 	if ( $clean_slate || isset($purge_index) ) 
-	{				
-		$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
+	{	
+		if ( empty($replace_index) )
+		{			
+			$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
 							TRUNCATE TABLE PMBPrefixes$index_suffix;
 							ALTER TABLE PMBTokens$index_suffix ENGINE=INNODB $innodb_row_format_sql;
 							ALTER TABLE PMBPrefixes$index_suffix ENGINE=INNODB $innodb_row_format_sql");
+		}
 				
 		# create new temporary tables		   
 		$connection->exec("DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
@@ -950,7 +984,7 @@ while ( !empty($url_list[$lp]) )
 												URL, 
 												checksum, 
 												url_checksum
-												FROM PMBDocinfo$index_suffix 
+												FROM $docinfo_target_table 
 												WHERE url_checksum IN ( " . implode(", ", array_fill(0, count($temp_links), "?")) . " )");
 				$linkpdo->execute(array_keys($temp_links));
 				
@@ -1009,7 +1043,7 @@ while ( !empty($url_list[$lp]) )
 	try
 	{
 		# this checksum is the checksum for content, not url
-		$checksumpdo = $connection->prepare("SELECT LOWER(HEX(checksum)) as checksum FROM PMBDocinfo$index_suffix WHERE url_checksum = UNHEX(MD5(:url))");	
+		$checksumpdo = $connection->prepare("SELECT LOWER(HEX(checksum)) as checksum FROM $docinfo_target_table WHERE url_checksum = UNHEX(MD5(:url))");	
 		$checksumpdo->execute(array(":url" => $url));
 		$db_md5_checksum = "";
 		
@@ -1222,7 +1256,7 @@ while ( !empty($url_list[$lp]) )
 						
 			$docinfo_time_start = microtime(true);
 			$count = count($docinfo_value_sets);
-			$docpdo = $connection->prepare("INSERT INTO PMBDocinfo$index_suffix 
+			$docpdo = $connection->prepare("INSERT INTO $docinfo_target_table
 											(
 											ID, 
 											URL, 
@@ -1354,7 +1388,7 @@ try
 					
 		$docinfo_time_start = microtime(true);
 		$count = count($docinfo_value_sets);
-		$docpdo = $connection->prepare("INSERT INTO PMBDocinfo$index_suffix 
+		$docpdo = $connection->prepare("INSERT INTO $docinfo_target_table
 										(
 										ID, 
 										URL, 
@@ -1485,10 +1519,8 @@ try
 	$key_start = microtime(true);
 	echo "Enabling keys for temporary tables...\n";
 	
-
 	# before anything else, build indexes for temporary tables
-	$connection->exec("ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;
-					   ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;");
+	$connection->exec("ALTER TABLE PMBdatatemp$index_suffix ENABLE KEYS;");
 	
 	$key_end = microtime(true) - $key_start;					
 	echo "Enabling keys took: $key_end seconds \n";					
@@ -1549,15 +1581,31 @@ else
 	require_once("prefix_compressor_merger.php");
 }
 
-
-$timer_end = microtime(true) - $timer;
-echo "The whole operation took $timer_end seconds \n";
-echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
-echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
-
 # reset temporary variables
 try
 {
+	if ( !empty($replace_index) )
+	{
+		$drop_start = microtime(true);
+		$connection->beginTransaction();
+		# delete old docinfo table and replace it with the new one
+		$connection->query("DROP TABLE PMBDocinfo$index_suffix");
+		$connection->query("ALTER TABLE $docinfo_target_table RENAME TO PMBDocinfo$index_suffix");
+		# delete old docinfo table and replace it with the new one
+		$connection->query("DROP TABLE PMBTokens$index_suffix");
+		$connection->query("ALTER TABLE PMBTokens".$index_suffix."_temp RENAME TO PMBTokens$index_suffix");
+		# delete old docinfo table and replace it with the new one
+		$connection->query("DROP TABLE PMBPrefixes$index_suffix");
+		$connection->query("ALTER TABLE PMBPrefixes".$index_suffix."_temp RENAME TO PMBPrefixes$index_suffix");
+		
+		$connection->query("UPDATE PMBIndexes SET documents = ( SELECT COUNT(ID) FROM PMBDocinfo$index_suffix ) WHERE ID = $index_id");
+		$connection->commit();
+		$drop_end = microtime(true) - $drop_start;
+		
+		echo "Replacing old tables with new ones took $drop_end seconds \n";
+	}
+	
+	
 	$connection->query("UPDATE PMBIndexes SET 
 						current_state = 0, 
 						temp_loads = 0, 
@@ -1566,8 +1614,14 @@ try
 }
 catch ( PDOException $e ) 
 {
-	echo "An error occurred when updating statistics: " . $e->getMessage() . "\n";
+	$connection->rollBack();
+	echo "An error occurred when switching tables : " . $e->getMessage() . "\n";
 }
+
+$timer_end = microtime(true) - $timer;
+echo "The whole operation took $timer_end seconds \n";
+echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
+echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
 
 # update current indexing state to false ( 0 ) 
 SetIndexingState(0, $index_id);

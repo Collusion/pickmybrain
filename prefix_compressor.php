@@ -120,7 +120,7 @@ try
 	{
 		$clean_slate_target = "PMBPrefixes$index_suffix";
 
-		if ( $clean_slate ) 
+		if ( $clean_slate && empty($replace_index) ) 
 		{
 			$target_table = "PMBPrefixes$index_suffix";
 		}
@@ -230,7 +230,7 @@ try
 		
 		$min_checksum 		= $checksum;
 		
-		if ( $rowcounter % 10000 === 0 ) 
+		if ( $rowcounter >= 10000 ) 
 		{
 			$statistic_start = microtime(true);
 			
@@ -259,11 +259,10 @@ try
 			$connection->query("UPDATE PMBIndexes SET temp_loads_left = temp_loads_left + $rowcounter WHERE ID = $index_id");
 			
 			$statistic_total_time += microtime(true)-$statistic_start;
+			$rowcounter = 0;
 		}
 	}
-	
-	echo "$rowcounter rows fetched \n";
-	
+		
 	# compress remaining data
 	if ( !empty($combinations) )
 	{
@@ -321,7 +320,6 @@ try
 			{
 				$ins_sql[0] = " ";
 				$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
-				#$inspdo->execute($escape);
 				$ins_sql = "";
 				$w = 0;
 				++$insert_counter;
@@ -356,7 +354,7 @@ try
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring data into one table took $transfer_time_end seconds \n";
 	
-	if ( !$clean_slate ) 
+	if ( !$clean_slate && empty($replace_index) ) 
 	{
 		$drop_start = microtime(true);
 		$connection->beginTransaction();
@@ -367,6 +365,10 @@ try
 		$connection->commit();
 		$drop_end = microtime(true) - $drop_start;
 	}	
+	else
+	{
+		echo "Skipping table switching, because replace_index is ON \n";
+	}
 }
 catch ( PDOException $e ) 
 {
