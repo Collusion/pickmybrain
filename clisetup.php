@@ -54,7 +54,6 @@ catch ( PDOException $e )
 }
 
 $folderpath = realpath(dirname(__FILE__));
-#$settings_file_path = $folderpath . "/settings.php";
 
 $main_menu = "\n";
 $main_menu .= "Pickmybrain command-line configuration tool\n";
@@ -64,7 +63,8 @@ $main_menu .= "1. Show existing indexes\n";
 $main_menu .= "2. Create a new index\n";
 $main_menu .= "3. Compile index settings\n";
 $main_menu .= "4. Purge index\n";
-$main_menu .= "5. Delete index\n\n";
+$main_menu .= "5. Delete index\n";
+$main_menu .= "6. Uninstall Pickmybrain\n\n";
 $main_menu .= "0. Exit\n";
 $main_menu .= "Input: ";
 
@@ -431,34 +431,14 @@ while ( true )
 					
 					if ( $confirm == "y" )
 					{
-						$sql = "SET FOREIGN_KEY_CHECKS=0;";			
-						for ( $i = 1 ; $i < 16 ; ++$i ) 
+						if ( deleteIndex($index_id) )
 						{
-							$sql .= "DROP TABLE IF EXISTS PMBtemporary_" . $index_id . "_" . $i . ";";
+							echo "Index was deleted succesfully.\n";
 						}
-						$sql .= "DROP TABLE IF EXISTS PMBDocinfo$index_suffix;
-								DROP TABLE IF EXISTS PMBPrefixes$index_suffix;
-								DROP TABLE IF EXISTS PMBTokens$index_suffix;
-								DROP TABLE IF EXISTS PMBMatches$index_suffix;
-								DROP TABLE IF EXISTS PMBDocMatches$index_suffix;
-								DROP TABLE IF EXISTS PMBCategories$index_suffix;
-								DROP TABLE IF EXISTS PMBQueryLog$index_suffix;
-								DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
-								DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
-								DROP TABLE IF EXISTS PMBpretemp$index_suffix;
-								SET FOREIGN_KEY_CHECKS=1;";
-						
-						$connection->exec($sql);
-						
-						# delete the entry from the indexes table			
-						$delpdo = $connection->prepare("DELETE FROM PMBIndexes WHERE ID = ?");
-						$delpdo->execute(array($index_id));
-						
-						# delete the settings file
-						@unlink($folderpath."/settings$index_suffix.txt");
-						
-						echo "Index was deleted succesfully.\n";
-						
+						else
+						{
+							echo "Something went wrong while deleting the index.\n";
+						}
 					}
 					else
 					{
@@ -478,6 +458,62 @@ while ( true )
 		else
 		{
 			echo "Index deletion was cancelled.\n";
+		}
+		
+		echo "\nPress Enter to continue... ";
+		$subinput = fgets($fp, 1024);
+		
+		break;
+		
+		case "6":
+		echo "You have chosen to uninstall Pickmybrain.\n";
+		echo "All indexes, indexed data, settings and MySQL-tables will be permanently deleted.\n";
+		echo "This program will quit immediately after deletion.\n";
+		echo "You will have to manually delete the pickmybrain folder.\n";
+		echo "If you do change your mind later, you can reinstall Pickmybrain by running this file again.\n";
+		echo "To continue, please type y.\n";
+		echo "To cancel, please type 0.\n";
+		$id = str_replace("\n", "", fgets($fp, 1024));
+		
+		if ( $id == "y" || $id == "Y" ) 
+		{
+			echo "Are you sure? (y/n): ";
+			$confirm = strtolower(str_replace("\n", "", fgets($fp, 1024)));
+					
+			if ( $confirm == "y" || $confirm == "Y" )
+			{
+				try
+				{
+					$checkpdo = $connection->query("SELECT ID FROM PMBIndexes");
+					
+					while ( $row = $checkpdo->fetch(PDO::FETCH_ASSOC) )
+					{
+						$index_id = (int)$row["ID"];
+						
+						if ( !deleteIndex($index_id) )
+						{
+							echo "Something went wrong while deleting index $index_id\n";
+						}
+					}
+
+					# then, remove the PMBIndexes table
+					$connection->query("DROP TABLE PMBIndexes");
+					
+					die("Thanks for using Pickmybrain!\n");
+				}
+				catch ( PDOException $e ) 
+				{
+					echo "An error occurred during uninstallation: " . $e->getMessage() . "\n";
+				}	
+			}
+			else
+			{
+				echo "Uninstallation was cancelled.\n";
+			}
+		}
+		else
+		{
+			echo "Uninstallation was cancelled.\n";
 		}
 		
 		echo "\nPress Enter to continue... ";

@@ -444,6 +444,34 @@ if ( !empty($_POST["action"]) && $_POST["action"] === "updatesettings" )
 		return;
 	}
 }
+else if ( !empty($_GET["action"]) && $_GET["action"] === "uninstallpmb" )
+{
+	try
+	{
+		$checkpdo = $connection->query("SELECT ID FROM PMBIndexes");
+		
+		while ( $row = $checkpdo->fetch(PDO::FETCH_ASSOC) )
+		{
+			$index_id = (int)$row["ID"];
+			
+			if ( !deleteIndex($index_id) )
+			{
+				echo "Something went wrong while deleting index $index_id\n";
+			}
+		}
+
+		# then, remove the PMBIndexes table
+		$connection->query("DROP TABLE PMBIndexes");
+		$_SESSION = array();
+		session_destroy();
+		header("Location: http://www.pickmybra.in");
+		return;
+	}
+	catch ( PDOException $e ) 
+	{
+		echo "An error occurred during uninstallation: " . $e->getMessage() . "\n";
+	}
+}
 else if ( !empty($_POST["action"]) && $_POST["action"] === "createindex"  ) 
 {
 	$new_index_name = "";
@@ -632,39 +660,7 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 		}
 		else if ( !empty($_POST["delete_index"]) ) 
 		{
-			# stop the indexer, reset statics
-			#$connection->beginTransaction();	
-			try
-			{	
-				$connection->beginTransaction();
-			
-				# remove index statistics
-				$connection->query("DELETE FROM PMBIndexes WHERE ID = $index_id");
-	
-				# delete index tables
-				$connection->exec("SET FOREIGN_KEY_CHECKS=0;
-									DROP TABLE IF EXISTS PMBDocinfo$index_suffix;
-									DROP TABLE IF EXISTS PMBPrefixes$index_suffix;
-									DROP TABLE IF EXISTS PMBTokens$index_suffix;
-									DROP TABLE IF EXISTS PMBMatches$index_suffix;
-									DROP TABLE IF EXISTS PMBDocMatches$index_suffix;
-									DROP TABLE IF EXISTS PMBCategories$index_suffix;
-									DROP TABLE IF EXISTS PMBQueryLog$index_suffix;
-									DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
-									DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
-									DROP TABLE IF EXISTS PMBpretemp$index_suffix;
-									SET FOREIGN_KEY_CHECKS=1;");
-							
-				$connection->commit();
-									
-				# delete the settings file
-				@unlink("settings$index_suffix.txt");
-				
-			}
-			catch ( PDOException $e ) 
-			{
-				$connection->rollBack();
-			}
+			deleteIndex($index_id);
 							
 			$redirect = 2;	
 			# reset statistics				
@@ -858,6 +854,32 @@ Hi there! Start configuration of your Pickmybrain search engine by selecting an 
     </p>
     </form>
 </div>
+
+<div class='settingsbox'>
+    <h3>Management</h3>
+    <p>
+    <?php
+	
+	if ( !empty($_GET["show"]) && $_GET["show"] === "uninstall" ) 
+	{
+		echo "You have chosen to uninstall Pickmybrain.<br>";
+		echo "All indexes, indexed data, settings and MySQL-tables will be permanently deleted.<br>";
+		echo "This program will quit immediately after deletion.<br>";
+		echo "You will have to manually delete the pickmybrain folder.<br>";
+		echo "If you do change your mind later, you can reinstall Pickmybrain by opening the web control panel again.<br>";
+		echo "<p> &gt; <a href='control.php'>I changed my mind.</a></p>";
+		echo "<p> &gt; <a href='control.php?action=uninstallpmb' onClick='return confirm(\"Are you sure you want to uninstall Pickmybrain?\");'>I want to uninstall Pickmybrain</a></p>";
+	}
+	else
+	{
+		echo "<a href='control.php?show=uninstall'>Uninstall Pickmybrain</a>";
+	}
+	
+	?>
+   
+   </p>
+</div>
+
 
 
 

@@ -66,6 +66,77 @@ function execInBackground($cmd)
     }
 }
 
+function deleteIndex($index_id)
+{
+	if ( empty($index_id) || !is_numeric($index_id) )
+	{
+		return false;
+	}
+	
+	$folderpath = realpath(dirname(__FILE__));
+	$index_suffix = "_".$index_id;
+	
+	try
+	{
+		$connection = db_connection();
+
+		# check if settings file exists for this index
+		$folder_path = realpath(dirname(__FILE__));
+		$filepath = $folder_path . "/settings_".$index_id.".txt";
+		if ( is_readable($filepath) )
+		{
+			include "autoload_settings.php";
+		}
+						
+		if ( !empty($mysql_data_dir) )
+		{
+			$t_filedir = $mysql_data_dir;
+		}
+		else
+		{
+			$t_filedir = $folderpath;
+		}
+		
+		@unlink($t_filedir . "/datatemp_".$index_id."_sorted.txt");
+		@unlink($t_filedir . "/pretemp_".$index_id."_sorted.txt");
+
+		$sql = "SET FOREIGN_KEY_CHECKS=0;";			
+		for ( $i = 1 ; $i < 16 ; ++$i ) 
+		{
+			$sql .= "DROP TABLE IF EXISTS PMBtemporary_" . $index_id . "_" . $i . ";";
+			@unlink($t_filedir . "/datatemp_".$index_id."_".$i.".txt");
+			@unlink($t_filedir . "/pretemp_".$index_id."_".$i.".txt");
+			@unlink($folderpath . "/pmb_".$index_id."_".$i.".pid");
+		}
+		$sql .= "DROP TABLE IF EXISTS PMBDocinfo$index_suffix;
+				DROP TABLE IF EXISTS PMBPrefixes$index_suffix;
+				DROP TABLE IF EXISTS PMBTokens$index_suffix;
+				DROP TABLE IF EXISTS PMBCategories$index_suffix;
+				DROP TABLE IF EXISTS PMBQueryLog$index_suffix;
+				DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
+				DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
+				DROP TABLE IF EXISTS PMBpretemp$index_suffix;
+				SET FOREIGN_KEY_CHECKS=1;";
+		
+		$connection->exec($sql);
+		
+		# delete the entry from the indexes table			
+		$delpdo = $connection->prepare("DELETE FROM PMBIndexes WHERE ID = ?");
+		$delpdo->execute(array($index_id));
+		
+		# delete the settings file
+		@unlink($folderpath."/settings$index_suffix.txt");
+		@unlink($folderpath . "/ext_db_connection$index_suffix.php");
+	}
+	catch ( PDOException $e ) 
+	{
+		echo "An error occurred when deleting the index: " . $e->getMessage() . "\n";
+		return false;
+	}
+	
+	return true;
+}
+
 function execWithCurl($url, $async = true)
 {
 	$timeout = 1;
