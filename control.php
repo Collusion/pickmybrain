@@ -448,7 +448,7 @@ else if ( !empty($_GET["action"]) && $_GET["action"] === "resetindexer" )
 {
 	$directory = realpath(dirname(__FILE__));
 	$exec_is_supported = false;
-	#$filepath = $directory . "/pmb_".$index_id."_".$process_number.".pid";
+
 	if ( function_exists("exec") && exec('echo EXEC') == 'EXEC' )
 	{
 		# issue kill commands for processes if it is supported

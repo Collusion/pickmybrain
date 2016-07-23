@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   0.92 BETA 
-Published: 22.07.2016
+Version:   0.93 BETA 
+Published: 24.07.2016
 
 copyright 2015-2016 Henri Ruutinen 
 
@@ -136,10 +136,11 @@ extra parameters (optional):
 	OR 
 	testmode ( checks index configuration for errors )
 	
-	purge	 ( removes all existing indexed data from current index )
+	purge	 ( removes all existing indexed data from current index,
+		   starts from scratch )
 
 	replace  ( keeps the old indexed data intact until the new indexer
-		   run is 100% completed ) 
+		   run is 100% completed, starts from scratch ) 
 
 OR
 
@@ -151,7 +152,8 @@ Tip:
 Pickmybrain supports gradually growing indexes. This means you can add 
 new documents into your search index simply by running the indexer again.
 In cases like these Pickmybrain will merge the old already compressed
-data with the new data. 
+data with the new data. If you wish to merge new data into existing data, 
+do not invoke the indexer with purge or replace parameter.
 
 Unfortunately Pickmybrain does not support modifying of already indexed data.
 At some point I will probably implement a kill-list feature which maintains 
