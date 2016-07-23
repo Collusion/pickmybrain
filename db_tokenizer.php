@@ -872,6 +872,7 @@ while ( true )
 			$connection->query("UPDATE PMBIndexes SET 
 							temp_loads = temp_loads + $awaiting_writes,
 							updated = UNIX_TIMESTAMP(),
+							current_state = 1,
 							documents = documents + $awaiting_writes
 							WHERE ID = $index_id");
 							
@@ -1004,6 +1005,7 @@ try
 		$connection->query("UPDATE PMBIndexes SET 
 							temp_loads = temp_loads + $awaiting_writes,
 							updated = UNIX_TIMESTAMP(),
+							current_state = 1,
 							documents = documents + $awaiting_writes
 							WHERE ID = $index_id");
 	}

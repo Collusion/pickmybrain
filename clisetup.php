@@ -64,7 +64,8 @@ $main_menu .= "2. Create a new index\n";
 $main_menu .= "3. Compile index settings\n";
 $main_menu .= "4. Purge index\n";
 $main_menu .= "5. Delete index\n";
-$main_menu .= "6. Uninstall Pickmybrain\n\n";
+$main_menu .= "6. Reset indexing states\n";
+$main_menu .= "7. Uninstall Pickmybrain\n\n";
 $main_menu .= "0. Exit\n";
 $main_menu .= "Input: ";
 
@@ -466,6 +467,36 @@ while ( true )
 		break;
 		
 		case "6":
+		echo "You have chosen to reset indexing states.\n";
+		echo "If you believe an indexing process has crashed, this option resets all process indicators.\n";
+		echo "This in turn will make it possible to run the indexer again.\n";
+		echo "Ongoing indexing processes will not be stopped.\n";
+		echo "Continue? (y/n)";
+		$id = str_replace("\n", "", fgets($fp, 1024));
+		
+		if ( $id == "Y" || $id == "y" ) 
+		{
+			try
+			{
+				$connection->query("UPDATE PMBIndexes SET current_state = 0");
+				echo "Indexing states were resetted successfully.";
+			}
+			catch ( PDOException $e ) 
+			{
+				echo "Something went wrong while resetting indexing states: " . $e->getMessage() . "\n";
+			}
+		}
+		else
+		{
+			echo "Resetting indexing states was aborted";
+		}
+		
+		echo "\nPress Enter to continue... ";
+		$subinput = fgets($fp, 1024);
+		
+		break;
+		
+		case "7":
 		echo "You have chosen to uninstall Pickmybrain.\n";
 		echo "All indexes, indexed data, settings and MySQL-tables will be permanently deleted.\n";
 		echo "This program will quit immediately after deletion.\n";

@@ -155,6 +155,7 @@ try
 	}
 		
 	# update current indexing state to true ( 1 ) 
+	SetProcessState($index_id, $process_number, 1);
 	SetIndexingState(1, $index_id);
 	
 	$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP() WHERE ID = ?");
@@ -1228,7 +1229,7 @@ while ( !empty($url_list[$lp]) )
 			$connection->query("UPDATE PMBIndexes SET 
 						temp_loads = temp_loads + $awaiting_writes,
 						updated = UNIX_TIMESTAMP(),
-						temp_loads_left = 0,
+						current_state = 1,
 						documents = documents + $awaiting_writes
 						WHERE ID = $index_id");
 						
@@ -1305,9 +1306,8 @@ while ( !empty($url_list[$lp]) )
 				if ( !$permission )
 				{
 					SetProcessState($index_id, $process_number, 0);
-					echo "Indexing was requested to be terminated...\n";
 					$connection->query("UPDATE PMBIndexes SET current_state = 0 WHERE ID = $index_id");
-					break;
+					die ("Indexing was requested to be terminated...\n");
 				}
 			}
 			catch ( PDOException $e ) 

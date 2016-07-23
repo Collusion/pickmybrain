@@ -444,6 +444,61 @@ if ( !empty($_POST["action"]) && $_POST["action"] === "updatesettings" )
 		return;
 	}
 }
+else if ( !empty($_GET["action"]) && $_GET["action"] === "resetindexer" )
+{
+	$directory = realpath(dirname(__FILE__));
+	$exec_is_supported = false;
+	#$filepath = $directory . "/pmb_".$index_id."_".$process_number.".pid";
+	if ( function_exists("exec") && exec('echo EXEC') == 'EXEC' )
+	{
+		# issue kill commands for processes if it is supported
+		$exec_is_supported = true;
+	}
+	
+	try
+	{
+		if ( !empty($_GET["kill"]) && $_GET["kill"] === "yes" )
+		{
+			$checkpdo = $connection->query("SELECT ID FROM PMBIndexes");
+			
+			while ( $row = $checkpdo->fetch(PDO::FETCH_ASSOC) )
+			{
+				$index_id = (int)$row["ID"];
+				$pidlist = array();
+				
+				# open pid files
+				for ( $i = 0 ; $i < 16 ; ++$i ) 
+				{
+					$filepath = $directory . "/pmb_".$index_id."_".$i.".pid";
+					if ( is_readable($filepath) )
+					{
+						$pid = file_get_contents($filepath);			
+						$pidlist[] = (int)$pid;
+					}
+				}
+				
+				if ( $exec_is_supported && !empty($pidlist) )
+				{
+					# kill 
+					foreach ( $pidlist as $pid ) 
+					{
+						exec("kill -9 $pid");
+					}
+				}
+			}
+		}
+		
+		# after this, update the PMBIndexes table
+		$connection->query("UPDATE PMBIndexes SET current_state = 0");
+	}
+	catch ( PDOException $e ) 
+	{
+		echo "An error occurred during uninstallation: " . $e->getMessage() . "\n";
+	}
+	
+	header("Location: control.php");
+	return;
+}
 else if ( !empty($_GET["action"]) && $_GET["action"] === "uninstallpmb" )
 {
 	try
@@ -602,7 +657,6 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			{
 				# launch via async curl
 				$url_to_exec = "http://localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=usermode&index_id=$index_id";
-				#echo "URL TO EXEC $url_to_exec <br>";
 				execWithCurl($url_to_exec);
 			}
 		}
@@ -872,12 +926,17 @@ Hi there! Start configuration of your Pickmybrain search engine by selecting an 
 	}
 	else
 	{
-		echo "<a href='control.php?show=uninstall'>Uninstall Pickmybrain</a>";
+		echo " <p>
+				<a href='control.php?action=resetindexer' onClick='return confirm(\"If you believe an indexing process has crashed, you can reset all process indicators with this option. Ongoing indexing processes will not be stopped. Continue?\");'>Reset indexing states</a>
+			   </p>
+			   <p>
+			   	<a href='control.php?show=uninstall'>Uninstall Pickmybrain</a>
+			   </p>";
 	}
 	
 	?>
-   
    </p>
+   
 </div>
 
 
