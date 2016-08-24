@@ -208,7 +208,7 @@ db_connection.php		this file defines how PHP is supposed to connect to your data
 db_tokenizer.php		database indexer
 db_tokenizer_ext.php		same as above, but uses external linux sort		
 ext_db_connection.php		(optional) this file defines an external read-only database for database indexes
-finalization.php		
+finalization.php		Replaces old db tables with new recently indexed tables
 indexer.php			to launch an indexing process, call this file with correct params
 input_value_processor.php	processes parameters for indexer, db_tokenizer and web_tokenizer
 livesearch.php			PHP backend file for the live search feature
