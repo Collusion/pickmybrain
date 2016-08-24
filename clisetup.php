@@ -21,36 +21,9 @@ if ( is_string($connection) )
 	return;
 }
 
-try
+if ( !checkPMBIndexes() )
 {
-	if ( !$connection->query("SHOW TABLES LIKE 'PMBIndexes'")->rowCount() )
-	{
-		# if the indexes table does not exists, create it now
-		$connection->query("CREATE TABLE PMBIndexes (
-			 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-			 name varbinary(20) NOT NULL,
-			 type tinyint(3) unsigned NOT NULL,
-			 comment varbinary(255) NOT NULL,
-			 documents int(10) unsigned NOT NULL DEFAULT '0',
-			 updated int(10) unsigned NOT NULL,
-			 indexing_permission tinyint(3) unsigned NOT NULL,
-			 indexing_started int(10) unsigned NOT NULL,
-			 current_state tinyint(3) unsigned NOT NULL,
-			 running_processes smallint(5) unsigned NOT NULL,
-			 temp_loads int(8) unsigned NOT NULL,
-			 temp_loads_left int(8) unsigned NOT NULL,
-			 PRIMARY KEY (ID,type,documents,current_state,updated,indexing_permission),
-			 UNIQUE KEY name (name),
-			 UNIQUE KEY ID (ID)
-			) ENGINE=MYISAM DEFAULT CHARSET=utf8");
-	}
-	
-}
-catch ( PDOException $e ) 
-{
-	echo "Something went wrong while creating the PMBIndexes table:\n";
-	echo $e->getMessage() . "\n";
-	return;
+	echo "Something went wrong while creating the PMBIndexes table.\n";
 }
 
 $folderpath = realpath(dirname(__FILE__));

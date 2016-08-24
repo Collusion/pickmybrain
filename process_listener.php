@@ -27,7 +27,7 @@ if ( $dist_threads > 1 )
 
 		while ( true ) 
 		{
-			$pdo = $connection->query("SELECT running_processes, indexing_permission FROM PMBIndexes WHERE ID = $index_id");
+			$pdo = $connection->query("SELECT indexing_permission FROM PMBIndexes WHERE ID = $index_id");
 			$row = $pdo->fetch(PDO::FETCH_ASSOC);
 			
 			foreach ( $pidlist as $pidfile => $pr_num )
@@ -38,17 +38,12 @@ if ( $dist_threads > 1 )
 				}
 			}
 			
+			# processes have stopped
 			if ( empty($pidlist) )
 			{
 				break;
 			}
-			
-			/*if ( $row["running_processes"] == 1 ) 
-			{
-				break;
-			}
-			else */
-			# if only the LSB bit is on ( the master process , equal to 1 ) , we can proceed
+
 			if ( $row["indexing_permission"] == 0 ) 
 			{
 				SetIndexingState(0, $index_id);

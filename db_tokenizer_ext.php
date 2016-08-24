@@ -82,27 +82,31 @@ if ( !empty($html_index_attrs) )
 	# get element => attributelist pairs 
 	foreach ( $html_index_attrs as $i => $value ) 
 	{
-		$subexpl = explode("=", $value);
-
-		if ( count($subexpl) === 2 ) 
+		$value = trim($value);
+		if ( !empty($value) )
 		{
-			$attrparts = explode(",", $subexpl[1]);
-			
-			$subexpl[0] = trim($subexpl[0]);
-			if ( empty($preserve_attributes[$subexpl[0]]) )
+			$subexpl = explode("=", $value);
+	
+			if ( count($subexpl) === 2 ) 
 			{
-				$preserve_attributes[$subexpl[0]] = array();
+				$attrparts = explode(",", $subexpl[1]);
+				
+				$subexpl[0] = trim($subexpl[0]);
+				if ( empty($preserve_attributes[$subexpl[0]]) )
+				{
+					$preserve_attributes[$subexpl[0]] = array();
+				}
+				
+				foreach ( $attrparts as $attrpart ) 
+				{
+					$preserve_attributes[$subexpl[0]][] = trim($attrpart);
+				}
 			}
-			
-			foreach ( $attrparts as $attrpart ) 
+			else
 			{
-				$preserve_attributes[$subexpl[0]][] = trim($attrpart);
+				$log .= "Error: following line of attributes to be preserved is incorrect: $value \n";
+				++$e_count;
 			}
-		}
-		else
-		{
-			$log .= "Error: following line of attributes to be preserved is incorrect: $value \n";
-			++$e_count;
 		}
 	}
 }
@@ -143,7 +147,7 @@ try
 	
 	if ( $process_number === 0 ) 
 	{
-		$ind_state = $connection->query("SELECT current_state, updated, documents FROM PMBIndexes WHERE ID = $index_id");
+		$ind_state = $connection->query("SELECT current_state, updated, documents, delta_documents, latest_rotation, max_id FROM PMBIndexes WHERE ID = $index_id");
 		
 		if ( $row = $ind_state->fetch(PDO::FETCH_ASSOC) )
 		{
@@ -157,6 +161,9 @@ try
 			{
 				die("too soon");
 			}
+			
+			$min_doc_id = (int)$row["max_id"]+1;
+			$delta_document_start_count = (int)$row["delta_documents"];
 			
 			if ( $row["documents"] > 0 ) 
 			{
@@ -178,18 +185,55 @@ try
 																temp_loads_left = 0
 																WHERE ID = ?");
 		$upd_state->execute(array($index_id));
-		
+			
+		# delta index rotation interval
+		if ( !empty($delta_indexing) && !$clean_slate )
+		{
+			if ( (!empty($delta_merge_interval) && time() - ($delta_merge_interval*60) > $row["latest_rotation"]) || !empty($manual_delta_merge) )
+			{
+				# delta index doesn't exist/is empty
+				if ( $delta_document_start_count === 0 ) 
+				{
+					if ( !empty($manual_delta_merge) )
+					{
+						SetIndexingState(0, $index_id);
+						SetProcessState($index_id, $process_number, 0);	
+						die("delta index merging requested, but there is nothing to merge ( delta index is empty ). Quitting now...\n");
+					}
+				}
+				else
+				{
+					echo "MERGING INDEX NOW\n";
+					# temporarily disable delta indexing and switch to replace index
+					$delta_indexing = null;
+					$replace_index = null;
+					
+					# if we are not delta-indexing, then this should not be harmful in any way
+					$connection->query("DELETE FROM PMBDocinfo".$index_suffix." WHERE ID > (SELECT max_id FROM PMBIndexes WHERE ID = $index_id)");
+				}
+			}
+		}
+		else
+		{
+			# if we are not delta-indexing, then this should not be harmful in any way
+			$connection->query("DELETE FROM PMBDocinfo".$index_suffix." WHERE ID > (SELECT max_id FROM PMBIndexes WHERE ID = $index_id)");
+		}
+	
 		$data_dir_sql = "";
 		if ( !empty($mysql_data_dir) )
 		{
 			$data_dir_sql = "DATA DIRECTORY = '$mysql_data_dir' INDEX DIRECTORY = '$mysql_data_dir'";
 		}
 		
-		$min_doc_id = 0;
+		#$min_doc_id = 0;
 		if ( isset($purge_index) )
 		{
-			$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix;
-							   UPDATE PMBIndexes SET documents = 0 WHERE ID = $index_id;");
+			$clean_slate = true;
+			$delta_indexing = null;
+			$replace_index = null;
+			$min_doc_id = 0;
+			$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix");
+			$connection->query("UPDATE PMBIndexes SET documents = 0, delta_documents = 0, max_id = 0 WHERE ID = $index_id");
 		}
 		else
 		{
@@ -200,16 +244,12 @@ try
 							 ID int(11) unsigned NOT NULL,
 							 avgsentiscore tinyint(4) NOT NULL,
 							 PRIMARY KEY (ID),
-							 KEY avgsentiscore (avgsentiscore)	
+							 KEY avgsentiscore (ID, avgsentiscore)	
 							) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql");	
 			}
-			
-			$idpdo = $connection->query("SELECT MAX(ID) FROM PMBDocinfo$index_suffix");
-			if ( $val = $idpdo->fetchColumn() )
-			{
-				$min_doc_id = (int)$val+1;
-			}
 		}
+		
+		echo "Min doc_id = $min_doc_id \n";
 	}
 	
 	if ( isset($purge_index) )
@@ -219,7 +259,7 @@ try
 	
 	if ( $use_internal_db === 1 ) 
 	{
-		# create nex connection for reading the data
+		# create connection for reading the data
 		$ext_connection = db_connection();
 	}
 	else
@@ -250,22 +290,40 @@ try
 			$min_doc_id = 0;
 		}
 	}
-		
+
 	$docinfo_target_table = "PMBDocinfo$index_suffix";
+	$doc_counter_target_column = "documents";
+	
 	if ( !empty($replace_index) )
 	{
 		$docinfo_target_table = "PMBDocinfo".$index_suffix."_temp";
 		$clean_slate = true;
 		$min_doc_id = 0;
 	}
-		
-	$senti_sql_column = "";
-	$senti_sql_index_column = "";
-	
-	if ( $sentiment_analysis )
+	else if ( (!empty($delta_indexing) && !$clean_slate) || !empty($delta_mode) )
 	{
-		$senti_sql_column = "sentiscore tinyint(3) NOT NULL,";
-		$senti_sql_index_column = ",sentiscore";
+		$docinfo_target_table = "PMBDocinfo".$index_suffix."_delta";
+		$doc_counter_target_column = "delta_documents";
+		
+		# create the table if it doesn't already exist! 
+		if ( $process_number === 0 ) 
+		{
+			try
+			{
+				$connection->query("UPDATE PMBIndexes SET $doc_counter_target_column = 0 WHERE ID = $index_id");
+				$connection->query("DROP TABLE IF EXISTS $docinfo_target_table");
+				$connection->query("CREATE TABLE IF NOT EXISTS $docinfo_target_table (
+					 ID int(11) unsigned NOT NULL,
+					 avgsentiscore tinyint(4) NOT NULL,
+					 PRIMARY KEY (ID)
+					) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql");
+				$connection->query("ALTER TABLE $docinfo_target_table DISABLE KEYS");
+			}
+			catch ( PDOException $e ) 
+			{
+				echo "Creating docinfo delta table failed :( \n";
+			}
+		}
 	}
 
 	# for measuring time
@@ -280,10 +338,9 @@ try
 			$temporary_table_type = "ENGINE=MYISAM DEFAULT CHARSET=utf8 ROW_FORMAT=FIXED $data_dir_sql";
 			
 			if ( $clean_slate || isset($purge_index) ) 
-			{				
+			{	
 				if ( empty($replace_index) )
 				{
-			
 					$connection->exec("TRUNCATE TABLE PMBTokens$index_suffix;
 										TRUNCATE TABLE PMBPrefixes$index_suffix;
 										ALTER TABLE PMBTokens$index_suffix ENGINE=INNODB $innodb_row_format_sql $data_dir_sql;
@@ -409,6 +466,11 @@ if ( $dist_threads > 1 && $process_number === 0 )
 	{
 		$cmd = "replace";
 		$curl = "&replace=1";
+	}
+	else if ( !empty($delta_indexing) && !$clean_slate ) 
+	{
+		$cmd = "delta";
+		$curl = "&delta=1";
 	}
 	
 	# launch sister-processes
@@ -773,14 +835,38 @@ while ( true )
 	
 	unset($expl);
 	
-	foreach ( $tokens as $token => $string ) 
+	if ( $sentiment_analysis ) 
 	{
-		$crc32 = crc32($token);
-		$b = md5($token);
-		$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
-		
-		$insert_buffer .= sprintf("%12X %8X", ($crc32<<16)|$tid, $document_id)."$string\n";
-		++$data_rows;
+		foreach ( $tokens as $token => $string ) 
+		{
+			$crc32 = crc32($token);
+			$b = md5($token);
+			$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+				
+			if ( isset($word_sentiment_scores[$token]) )
+			{
+				$wordsenti = $word_sentiment_scores[$token];
+			}
+			else
+			{
+				$wordsenti = 0;
+			}
+			
+			$insert_buffer .= sprintf("%12X %8X %X", ($crc32<<16)|$tid, $document_id, $wordsenti)."$string\n";
+			++$data_rows;
+		}
+	}
+	else
+	{
+		foreach ( $tokens as $token => $string ) 
+		{
+			$crc32 = crc32($token);
+			$b = md5($token);
+			$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+			
+			$insert_buffer .= sprintf("%12X %8X", ($crc32<<16)|$tid, $document_id)."$string\n";
+			++$data_rows;
+		}
 	}
 	
 	unset($tokens);
@@ -849,7 +935,7 @@ while ( true )
 							temp_loads = temp_loads + $awaiting_writes,
 							updated = UNIX_TIMESTAMP(),
 							current_state = 1,
-							documents = documents + $awaiting_writes
+							$doc_counter_target_column = $doc_counter_target_column + $awaiting_writes
 							WHERE ID = $index_id");
 							
 			$log .= "Index statistics ok \n";
@@ -966,7 +1052,7 @@ try
 							temp_loads = temp_loads + $awaiting_writes,
 							updated = UNIX_TIMESTAMP(),
 							current_state = 1,
-							documents = documents + $awaiting_writes
+							$doc_counter_target_column = $doc_counter_target_column + $awaiting_writes
 							WHERE ID = $index_id");
 	}
 	
@@ -1005,13 +1091,8 @@ $interval = microtime(true) - $timer;
 echo "Maintaining a list of unique tokens took $toktemp_total_insert seconds \n";
 echo "Data tokenization is complete, $interval seconds elapsed, starting to compose prefixes...\n";
 
-if ( $documents === 0 ) 
-{
-	# no documents processed, no reason to continue!
-	SetIndexingState(0, $index_id);
-	SetProcessState($index_id, $process_number, 0);	
-	die( "No documents processed, quitting now.. \n" );
-}
+# check that some data is indexed; stop now otherwise
+require("autostop.php");
 
 # start prefix creation
 SetIndexingState(2, $index_id);
@@ -1049,11 +1130,25 @@ for ( $i = 0 ; $i < $dist_threads ; ++$i )
 {
 	#echo "Sorting temporary prefix data for process_number $i \n";
 	$filepath = $sort_directory . "/pretemp_".$index_id."_".$i.".txt";
-	$all_filepaths .= $filepath . " ";
+	
+	if ( is_readable($filepath) && filesize($filepath) )
+	{
+		$all_filepaths .= $filepath . " ";
+	}
 }
 
-echo "Starting to sort prefix data \n";
-exec("LC_ALL=C sort $tmp_sort_dir -k1,1 $all_filepaths > $filepath_sorted");
+if ( !empty($all_filepaths) )
+{
+	echo "Starting to sort prefix data \n";
+	exec("LC_ALL=C sort $tmp_sort_dir -k1,1 $all_filepaths > $filepath_sorted");
+}
+else
+{
+	# create a dummy file for the prefix compressor ( so it won't get nervous ) 
+	file_put_contents($filepath_sorted, "");
+	$skip_prefix_merging = true;
+	echo "No prefix data to sort...\n";
+}
 
 for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
 {
@@ -1117,14 +1212,27 @@ $filepath_sorted =  $sort_directory . "/datatemp_".$index_id."_sorted.txt";
 for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
 {
 	$filepath = $sort_directory . "/datatemp_".$index_id."_".$i.".txt";
-	$all_filepaths .= $filepath . " ";
+	
+	if ( is_readable($filepath) && filesize($filepath) )
+	{
+		$all_filepaths .= $filepath . " ";
+	}
 }
 	
 # sort the external data files
-$sort_start = microtime(true);
-exec("LC_ALL=C sort $tmp_sort_dir -k1,1 -k2,2 $all_filepaths > $filepath_sorted");
-$sort_end = microtime(true)-$sort_start;
-echo "Sorting temporary match data took $sort_end seconds \n";
+if ( !empty($all_filepaths) )
+{
+	$sort_start = microtime(true);
+	exec("LC_ALL=C sort $tmp_sort_dir -k1,1 -k2,2 $all_filepaths > $filepath_sorted");
+	$sort_end = microtime(true)-$sort_start;
+	echo "Sorting temporary match data took $sort_end seconds \n";
+}
+else
+{
+	# create a dummy file for the prefix compressor ( so it won't get nervous ) 
+	file_put_contents($filepath_sorted, "");
+	echo "No token data to sort...\n";
+}
 
 for ( $i = 0 ; $i < $dist_threads ; ++$i ) 
 {
@@ -1136,7 +1244,7 @@ for ( $i = 0 ; $i < $dist_threads ; ++$i )
 SetIndexingState(3, $index_id);
 
 # run token compressor
-if ( $clean_slate )
+if ( $clean_slate || !empty($delta_indexing) )
 {	
 	require_once("token_compressor_ext.php");
 }
@@ -1145,53 +1253,24 @@ else
 	require_once("token_compressor_merger_ext.php");
 }
 
-# run prefix compressor
-if ( $clean_slate )
+if ( $clean_slate || !empty($delta_indexing) )
 {
 	require_once("prefix_compressor_ext.php");
 }
-else
+else 
 {
-	require_once("prefix_compressor_merger_ext.php");
-}
-
-
-# reset temporary variables
-try
-{
-	if ( !empty($replace_index) )
+	if ( empty($skip_prefix_merging) )
 	{
-		$drop_start = microtime(true);
-		$connection->beginTransaction();
-		# delete old docinfo table and replace it with the new one
-		$connection->query("DROP TABLE PMBDocinfo$index_suffix");
-		$connection->query("ALTER TABLE $docinfo_target_table RENAME TO PMBDocinfo$index_suffix");
-		# delete old docinfo table and replace it with the new one
-		$connection->query("DROP TABLE PMBTokens$index_suffix");
-		$connection->query("ALTER TABLE PMBTokens".$index_suffix."_temp RENAME TO PMBTokens$index_suffix");
-		# delete old docinfo table and replace it with the new one
-		$connection->query("DROP TABLE PMBPrefixes$index_suffix");
-		$connection->query("ALTER TABLE PMBPrefixes".$index_suffix."_temp RENAME TO PMBPrefixes$index_suffix");
-		
-		$connection->query("UPDATE PMBIndexes SET documents = ( SELECT COUNT(ID) FROM PMBDocinfo$index_suffix ) WHERE ID = $index_id");
-		$connection->commit();
-		$drop_end = microtime(true) - $drop_start;
-		
-		echo "Replacing old tables with new ones took $drop_end seconds \n";
+		require_once("prefix_compressor_merger_ext.php");
 	}
-	
-	
-	$connection->query("UPDATE PMBIndexes SET 
-						current_state = 0, 
-						temp_loads = 0, 
-						temp_loads_left = 0
-						WHERE ID = $index_id ");
+	else
+	{
+		echo "Skipping prefix merging - nothing to merge! \n";
+	}
 }
-catch ( PDOException $e ) 
-{
-	$connection->rollBack();
-	echo "An error occurred when switching tables : " . $e->getMessage() . "\n";
-}
+
+# finalize index / ( switch tables etc )
+require("finalization.php");
 
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";

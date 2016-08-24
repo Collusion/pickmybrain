@@ -103,9 +103,7 @@ try
 	}
 	else
 	{
-		$clean_slate_target = "PMBTokens$index_suffix";
-
-		if ( $clean_slate && empty($replace_index) ) 
+		if ( empty($replace_index) && $clean_slate ) 
 		{
 			$target_table = "PMBTokens$index_suffix";
 		}
@@ -489,22 +487,6 @@ try
 	}
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
-
-	if ( !$clean_slate && empty($replace_index) )
-	{
-		$drop_start = microtime(true);
-		$connection->beginTransaction();
-		# remove the old table and rename the new one
-		$connection->query("DROP TABLE $clean_slate_target");
-		$connection->query("ALTER TABLE $target_table RENAME TO $clean_slate_target");
-		
-		$connection->commit();
-		$drop_end = microtime(true) - $drop_start;
-	}
-	else
-	{
-		echo "Skipping table switching, because replace_index is ON \n";
-	}
 	
 }
 catch ( PDOException $e ) 
@@ -518,7 +500,7 @@ $tokens_end = microtime(true) - $tokens_start;
 echo "Inserting tokens into temp tables took $token_insert_time seconds \n";
 echo "Updating statistics took $statistic_total_time seconds \n";
 echo "Combining temp tables took $transfer_time_end seconds \n";
-if ( !$clean_slate ) echo "Switching tables took $drop_end seconds \n";
+#if ( !$clean_slate ) echo "Switching tables took $drop_end seconds \n";
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
 echo "------------------------------------------------\nCompressing token data took $tokens_end seconds \n------------------------------------------------\n\nWaiting for prefixes...";

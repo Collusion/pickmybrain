@@ -37,12 +37,19 @@ else
 	$directory = realpath(dirname(__FILE__));
 }
 $filepath = $directory."/datatemp".$index_suffix."_sorted.txt";
+
+if ( !is_readable($filepath) )
+{
+	echo "ERROR: $filepath is not readable, skipping token compressing...\n";
+	return;
+}
+
 $f = fopen($filepath, "r");
 
 require "data_partitioner.php";
 
 # launch sister processes here if multiprocessing is turned on! 
-if ( $dist_threads > 1 && $process_number === 0  ) 
+if ( $dist_threads > 1 && $process_number === 0 && empty($temp_disable_multiprocessing) ) 
 {
 	# launch sister-processes
 	for ( $x = 1 ; $x < $dist_threads ; ++$x ) 
@@ -104,15 +111,9 @@ try
 	{
 		$clean_slate_target = "PMBTokens$index_suffix";
 
-		if ( $clean_slate ) 
-		{
-			$target_table = "PMBTokens$index_suffix";
-		}
-		else
-		{
-			# use temporary target table
-			$target_table = "PMBTokens".$index_suffix."_temp";
-			$connection->exec("DROP TABLE IF EXISTS $target_table;
+		# use temporary target table
+		$target_table = "PMBTokens".$index_suffix."_temp";
+		$connection->exec("DROP TABLE IF EXISTS $target_table;
 						CREATE TABLE IF NOT EXISTS $target_table (
 						 checksum int(10) unsigned NOT NULL,
 						 token varbinary(40) NOT NULL,
@@ -120,7 +121,7 @@ try
 						 doc_ids mediumblob NOT NULL,
 						 PRIMARY KEY(checksum, token)
 						 ) ENGINE=INNODB DEFAULT CHARSET=utf8;");
-		}
+		
 	}
 
 	$rows = 0;
@@ -656,71 +657,73 @@ catch ( PDOException $e )
 
 try
 {
-	$transfer_time_start = microtime(true);
-	for ( $i = 1 ; $i < $dist_threads ; ++$i ) 
+	if ( empty($temp_disable_multiprocessing) )
 	{
-		$sql = "SELECT * FROM PMBtemporary".$index_suffix."_$i";
-		$temppdo = $unbuffered_connection->query($sql);
-		$connection->beginTransaction();
-		$w = 0;
-		$ins_sql = "";
-		$insert_counter = 0;
-		while ( $row = $temppdo->fetch(PDO::FETCH_ASSOC) )
+		$transfer_time_start = microtime(true);
+		for ( $i = 1 ; $i < $dist_threads ; ++$i ) 
 		{
-			if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit ) 
+			$sql = "SELECT * FROM PMBtemporary".$index_suffix."_$i";
+			$temppdo = $unbuffered_connection->query($sql);
+			$connection->beginTransaction();
+			$w = 0;
+			$ins_sql = "";
+			$insert_counter = 0;
+			while ( $row = $temppdo->fetch(PDO::FETCH_ASSOC) )
+			{
+				if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit ) 
+				{
+					$ins_sql[0] = " ";
+					$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, doc_matches, doc_ids ) VALUES $ins_sql");
+					unset($ins_sql);
+					$ins_sql = "";
+					$w = 0;
+					++$insert_counter;
+					
+					if ( $insert_counter >= $flush_interval ) 
+					{
+						$connection->commit();
+						$connection->beginTransaction();
+						$insert_counter = 0;
+					}
+				}
+		
+				$ins_sql 	.= ",(".$row["checksum"].",
+							".$connection->quote($row["token"]).",
+							".$row["doc_matches"].",
+							".$connection->quote($row["doc_ids"]).")";
+				++$w;	
+			}
+			
+			$temppdo->closeCursor();
+			
+			# rest of the values
+			if ( !empty($ins_sql) ) 
 			{
 				$ins_sql[0] = " ";
 				$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, doc_matches, doc_ids ) VALUES $ins_sql");
 				unset($ins_sql);
 				$ins_sql = "";
-				$w = 0;
-				++$insert_counter;
-				
-				if ( $insert_counter >= $flush_interval ) 
-				{
-					$connection->commit();
-					$connection->beginTransaction();
-					$insert_counter = 0;
-				}
+				$insert_counter = 0;
 			}
-	
-			$ins_sql 	.= ",(".$row["checksum"].",
-						".$connection->quote($row["token"]).",
-						".$row["doc_matches"].",
-						".$connection->quote($row["doc_ids"]).")";
-			++$w;	
+			
+			$connection->commit();
+			$connection->query("DROP TABLE IF EXISTS PMBtemporary".$index_suffix."_$i");
 		}
 		
-		$temppdo->closeCursor();
-		
-		# rest of the values
-		if ( !empty($ins_sql) ) 
-		{
-			$ins_sql[0] = " ";
-			$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, doc_matches, doc_ids ) VALUES $ins_sql");
-			unset($ins_sql);
-			$ins_sql = "";
-			$insert_counter = 0;
-		}
-		
-		$connection->commit();
-		$connection->query("DROP TABLE IF EXISTS PMBtemporary".$index_suffix."_$i");
+		$transfer_time_end = microtime(true)-$transfer_time_start;
+		if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
 	}
-	
-	$transfer_time_end = microtime(true)-$transfer_time_start;
-	if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
 
-	if ( !$clean_slate )
-	{
-		$drop_start = microtime(true);
-		$connection->beginTransaction();
-		# remove the old table and rename the new one
-		$connection->query("DROP TABLE $clean_slate_target");
-		$connection->query("ALTER TABLE $target_table RENAME TO $clean_slate_target");
+	
+	$drop_start = microtime(true);
+	$connection->beginTransaction();
+	# remove the old table and rename the new one
+	$connection->query("DROP TABLE $clean_slate_target");
+	$connection->query("ALTER TABLE $target_table RENAME TO $clean_slate_target");
 		
-		$connection->commit();
-		$drop_end = microtime(true) - $drop_start;
-	}
+	$connection->commit();
+	$drop_end = microtime(true) - $drop_start;
+	
 	
 }
 catch ( PDOException $e ) 
@@ -745,7 +748,7 @@ $filepath = $directory."/datatemp".$index_suffix."_sorted.txt";
 
 echo "Inserting tokens into temp tables took $token_insert_time seconds \n";
 echo "Updating statistics took $statistic_total_time seconds \n";
-echo "Combining temp tables took $transfer_time_end seconds \n";
+if ( !empty($transfer_time_end) ) echo "Combining temp tables took $transfer_time_end seconds \n";
 if ( !$clean_slate ) echo "Switching tables took $drop_end seconds \n";
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";

@@ -92,6 +92,7 @@ class PickMyBrain
 	private $non_scored_sortmodes;
 	private $hex_lookup_decode;
 	private $documents_in_collection;
+	private $delta_documents;
 	private $index_state;
 	private $latest_indexing_done;
 	private $query_start_time;
@@ -172,10 +173,7 @@ class PickMyBrain
 		$this->charset_regexp		= "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "*\"]/u";
 		$this->result				= array();
 		$this->current_index		= $index_id;
-		$this->number_of_fields		= $number_of_fields;
-		
 		$this->field_id_width		= $this->requiredBits($number_of_fields);
-		#$this->lsbits				= pow(2, $number_of_fields)-1;
 		$this->lsbits				= pow(2, $this->field_id_width)-1;
 		$this->sentiment_analysis	= $sentiment_analysis;
 		$this->data_columns			= $data_columns;
@@ -496,7 +494,7 @@ class PickMyBrain
 		try
 		{
 			# 1. how many documents total + statistics
-			$countpdo = $this->db_connection->prepare("SELECT ID, type, documents, current_state, updated FROM PMBIndexes WHERE name = ?");
+			$countpdo = $this->db_connection->prepare("SELECT ID, type, documents, delta_documents, current_state, updated FROM PMBIndexes WHERE name = ?");
 			$countpdo->execute(array(mb_strtolower(trim($indexname))));
 				
 			if ( $row = $countpdo->fetch(PDO::FETCH_ASSOC) )
@@ -509,6 +507,13 @@ class PickMyBrain
 					$this->documents_in_collection 	= (int)$row["documents"];
 					$this->index_state 				= (int)$row["current_state"];
 					$this->latest_indexing_done 	= (int)$row["updated"];
+					$this->delta_documents		 	= 0;
+					
+					if ( !empty($row["delta_documents"]) )
+					{
+						$this->documents_in_collection += $row["delta_documents"];
+						$this->delta_documents			= $row["delta_documents"];
+					}
 				}
 				else
 				{
@@ -814,9 +819,11 @@ class PickMyBrain
 				
 				$keyword_pairs[$token] = $token;
 
-				$token_sql[] = "(checksum = CRC32(?) AND token = ?)";
-				$token_escape[] = $token;
-				$token_escape[] = $token;
+				#$token_sql[] = "(checksum = CRC32(?) AND token = ?)";
+				#$token_escape[] = $token;
+				#$token_escape[] = $token;
+				$token_sql[] = "(checksum = CRC32(:tok$tc) AND token = :tok$tc)";
+				$token_escape[":tok$tc"] = $token;
 				++$tc;
 		
 				# if defined as exact keyword, do not stem
@@ -832,8 +839,9 @@ class PickMyBrain
 					
 					if ( $nodialect !== $token ) 
 					{
-						$token_sql_stem[] = "CRC32(?)";
-						$token_escape_stem[] = $nodialect;
+						$token_sql_stem[] = "CRC32(:sum$tsc)";
+						$token_escape_stem[":sum$tsc"] = $nodialect;
+						++$tsc;
 						
 						$checksum_lookup[crc32($nodialect)] = $nodialect;
 
@@ -881,11 +889,13 @@ class PickMyBrain
 				if ( !empty($stem) && $min_len < $keyword_len )
 				{
 					# add both keyword and the stem
-					$token_sql_stem[] = "CRC32(?)";
-					$token_sql_stem[] = "CRC32(?)";
-
-					$token_escape_stem[] = $stem;
-					$token_escape_stem[] = $token;
+					$token_sql_stem[] = "CRC32(:sum$tsc)";
+					$token_escape_stem[":sum$tsc"] = $stem;
+					++$tsc;
+					
+					$token_sql_stem[] = "CRC32(:sum$tsc)";
+					$token_escape_stem[":sum$tsc"] = $token;
+					++$tsc;
 					
 					$checksum_lookup[crc32($stem)] = $stem;
 					$checksum_lookup[crc32($token)] = $token;
@@ -897,18 +907,18 @@ class PickMyBrain
 					}
 						
 					$keyword_pairs[$stem] = $token;
-					++$tsc;
+					
 				}
 				# no stemmed version available
 				else if ( $min_len >= $this->prefix_length )
 				{
 					# only add the original
-					$token_sql_stem[] = "CRC32(?)";
-					
-					$token_escape_stem[] = $token;
+					$token_sql_stem[] = "CRC32(:sum$tsc)";
+					$token_escape_stem[":sum$tsc"] = $token;
+					++$tsc;
 					
 					$checksum_lookup[crc32($token)] = $token;
-					++$tsc;
+					
 				}	
 			}
 		}
@@ -918,13 +928,16 @@ class PickMyBrain
 		
 		$switch_typecase = "(CASE token ";
 		$temp = array();
+		$c = 0;
 		foreach ( $non_stemmed_keywords as $nonstem ) 
 		{
-			$switch_typecase .= "WHEN ? THEN 0 ";
-			$temp[] = $nonstem;
+			$switch_typecase .= "WHEN :case$c THEN 0 ";
+			$token_escape[":case$c"] = $nonstem;
+			++$c;
 		}
 		$switch_typecase .= " ELSE 1 END) as type";
-		$token_escape = array_merge($temp, $token_escape);
+		#$token_escape = array_merge($temp, $token_escape);
+		#$token_escape = $temp + $token_escape;
 
 		# for special cases
 		# queries like: genesis tonight tonight tonight ( same keyword multiple times )
@@ -974,7 +987,6 @@ class PickMyBrain
 						"PMBPrefixes".$this->suffix, 
 						"PMBDocinfo".$this->suffix, 
 						"PMBCategories".$this->suffix);
-							
 			
 		$start_end_time = microtime(true) - $this->query_start_time;
 				
@@ -987,9 +999,24 @@ class PickMyBrain
 				$prefix_grouper = array();
 				$prefix_data = array();
 				
-				$ppdo = $this->db_connection->prepare(str_ireplace($find, $repl, "SELECT checksum, tok_data FROM PMBPrefixes WHERE checksum IN(" . implode(",", $token_sql_stem) . ")"));
+				if ( $this->delta_documents > 0 ) 
+				{
+					$prefix_sql = "(
+									SELECT checksum, tok_data FROM PMBPrefixes".$this->suffix." WHERE checksum IN(" . implode(",", $token_sql_stem) . ")
+								   )
+								   UNION ALL
+								   (
+								    SELECT checksum, tok_data FROM PMBPrefixes".$this->suffix."_delta WHERE checksum IN(" . implode(",", $token_sql_stem) . ")
+								   )";
+				}
+				else
+				{
+					$prefix_sql = "SELECT checksum, tok_data FROM PMBPrefixes".$this->suffix." WHERE checksum IN(" . implode(",", $token_sql_stem) . ")";	
+				}
+				
+				$ppdo = $this->db_connection->prepare($prefix_sql);
 				$ppdo->execute($token_escape_stem);	
-					
+
 				while ( $row = $ppdo->fetch(PDO::FETCH_ASSOC) )
 				{
 					$prefix_checksum = (int)$row["checksum"];
@@ -1045,10 +1072,10 @@ class PickMyBrain
 				foreach ( $prefix_data as $checksum => $cutlen ) 
 				{
 					# checksum === checksum of the token that this prefix points to
-					$token_sql[] = "(checksum = ? AND token LIKE CONCAT('%', ?, '%'))";
+					$token_sql[] = "(checksum = :sumadd$i AND token LIKE CONCAT('%', :tokadd$i, '%'))";
 					
-					$token_escape[] = $checksum;
-					$token_escape[] = $prefix_grouper[$checksum];
+					$token_escape[":sumadd$i"] = $checksum;
+					$token_escape[":tokadd$i"] = $prefix_grouper[$checksum];
 
 					++$i;
 					
@@ -1060,6 +1087,11 @@ class PickMyBrain
 	
 				$this->result["stats"]["prefix_time"] = microtime(true) - $prefix_time_start;
 			}
+			
+			#echo "<textarea>";
+			#print_r($prefix_grouper);
+			#echo "</textarea>";
+			
 			
 			# run indexer if conditions allow it
 			# auto indexing is enabled, indexer has not been run too recently, indexer is not already running
@@ -1093,7 +1125,24 @@ class PickMyBrain
 			# switch to unbuffered mode
 			$this->db_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
 			
-			$tokpdo = $this->db_connection->prepare(str_ireplace($find, $repl, "SELECT token, $switch_typecase, doc_matches, doc_ids FROM PMBTokens WHERE " . implode(" OR ", $token_sql)));
+			if ( $this->delta_documents > 0 ) 
+			{
+				$token_main_sql = "(
+								SELECT token, $switch_typecase, doc_matches, doc_ids FROM PMBTokens".$this->suffix." WHERE " . implode(" OR ", $token_sql) . "
+								)
+								UNION ALL
+								(
+								SELECT token, $switch_typecase, doc_matches, doc_ids FROM PMBTokens".$this->suffix."_delta WHERE " . implode(" OR ", $token_sql) . "
+								)";
+			}
+			else
+			{
+				$token_main_sql = "SELECT token, $switch_typecase, doc_matches, doc_ids FROM PMBTokens".$this->suffix." WHERE " . implode(" OR ", $token_sql);
+			}
+			
+			#echo "<textarea>$token_main_sql \nESCAPE:\n".implode("\n", $token_escape)."</textarea>";
+			
+			$tokpdo = $this->db_connection->prepare($token_main_sql);
 			$tokpdo->execute($token_escape);
 
 			$pos_data_p = 0;
@@ -1229,7 +1278,8 @@ class PickMyBrain
 				$first_sep_pos = strpos($row["doc_ids"], pack("H*", "80"));
 
 				# store binary data position in the position_data array
-				$pointer_array_start[$token_id] = $pos_data_p;
+				$pointer_array_start[$pos_data_p] = $token_id;
+				$temp_pos_data_p = $pos_data_p;
 				
 				$token_matches = explode($bin_separator, substr($row["doc_ids"], $first_sep_pos+1));
 				
@@ -1260,7 +1310,7 @@ class PickMyBrain
 					}
 				}
 
-				$pointer_array_end[$token_id] = $pos_data_p;
+				$pointer_array_end[$temp_pos_data_p] = $pos_data_p;
 
 				++$tic;
 			}
@@ -1325,20 +1375,7 @@ class PickMyBrain
 			
 			$i = 1;
 			foreach ( $sumcounts as $k_index => $doc_matches ) 
-			{
-				# phrase score
-				/*
-				if ( !empty($sumcounts[$k_index+1]) )
-				{
-					foreach ( $sumdata[$k_index] as $token_id )
-					{
-						foreach ( $sumdata[$k_index+1] as $token_id_2 )
-						{
-							$token_pairs[$token_id][$token_id_2] = 1;
-						}
-					}
-				}*/
-				
+			{				
 				foreach ( $sumdata[$k_index] as $token_id )
 				{
 					$token_group_lookup[$token_id] = $k_index;
@@ -1352,25 +1389,6 @@ class PickMyBrain
 
 				++$i;
 			}
-
-			/*
-			if ( !empty($real_token_pairs) )
-			{
-				$reversed_tok_ids = array_flip($token_ids);
-				$real_token_pair_ids = array();
-				foreach ( $real_token_pairs as $token => $secondary ) 
-				{
-					foreach ( $secondary as $token_2 => $value ) 
-					{
-						if ( !empty($reversed_tok_ids[$token]) && !empty($reversed_tok_ids[$token_2]) )
-						{
-							$token_id = $reversed_tok_ids[$token];
-							$token_id_2 = $reversed_tok_ids[$token_2];
-							$token_pairs[$token_id][$token_id_2] = 1;
-						}
-					}
-				}
-			}*/
 
 			# ensure that all provided keywords return results
 			foreach ( $token_match_count as $token => $match_count ) 
@@ -1395,11 +1413,11 @@ class PickMyBrain
 
 			if ( $this->matchmode === PMB_MATCH_ANY )
 			{
-				# any single matched keyword will do if matchmode is PMB_MATCH_ANY
-				foreach ( $pointer_array_start as $token_id => $startpos ) 
+				# any single matched keyword will do if matchmode is PMB_MATCH_ANY 
+				foreach ( $pointer_array_start as $startpos => $token_id ) 
 				{
 					# iterate through document ids array
-					for ( $i = $startpos ; $i < $pointer_array_end[$token_id] ; ++$i )
+					for ( $i = $startpos ; $i < $pointer_array_end[$startpos] ; ++$i )
 					{
 						$doc_id = $document_ids[$i];
 						if ( empty($non_wanted_doc_ids[$doc_id]) )
@@ -1411,10 +1429,10 @@ class PickMyBrain
 			}
 			else
 			{
-				foreach ( $pointer_array_start as $token_id => $startpos ) 
+				foreach ( $pointer_array_start as $startpos => $token_id ) 
 				{
 					# iterate through document ids array ( for current token id ) 
-					for ( $i = $startpos ; $i < $pointer_array_end[$token_id] ; ++$i )
+					for ( $i = $startpos ; $i < $pointer_array_end[$startpos] ; ++$i )
 					{
 						$doc_id = $document_ids[$i];
 						if ( !isset($non_wanted_doc_ids[$doc_id]) )
@@ -1425,11 +1443,11 @@ class PickMyBrain
 					}
 				}
 
-				# otherwise all provided keywords must be found ( PMB_MATCH_ALL , PMB_MATCH_STRICT )
-				foreach ( $pointer_array_start as $token_id => $startpos ) 
+				# otherwise all provided keywords must be found ( PMB_MATCH_ALL , PMB_MATCH_STRICT ) 
+				foreach ( $pointer_array_start as $startpos => $token_id ) 
 				{
 					# iterate through document ids array
-					for ( $i = $startpos ; $i < $pointer_array_end[$token_id] ; ++$i )
+					for ( $i = $startpos ; $i < $pointer_array_end[$startpos] ; ++$i )
 					{
 						$doc_id = $document_ids[$i];
 							
@@ -1531,10 +1549,6 @@ class PickMyBrain
 							
 							if ( $bits > 127 )
 							{
-								# 8th bit is set, number ends here ! 
-								$delta = $temp+$delta-1;
-								$data_item = $delta;
-								
 								if ( $x === 0 && $this->sentiment_analysis ) 
 								{
 									# first value is the sentiment score	
@@ -1542,6 +1556,9 @@ class PickMyBrain
 								}
 								else
 								{
+									# 8th bit is set, number ends here ! 
+									$delta = $temp+$delta-1;
+									$data_item = $delta;
 									
 									# get the field_id bits + token_id_2 bits
 									$field_id = $data_item & $this->lsbits;
@@ -1551,38 +1568,17 @@ class PickMyBrain
 
 									# self score match
 									$tempdata[$qind][1] |= (1<<$field_id);
+									
+									++$tempdata[$qind][3]; # new match
 								}
 	
 								++$x;
 								$temp = 0;
 								$shift = 0;
-								++$tempdata[$qind][3]; # new match
+								
 							}
 						}
 					}
-					
-					# strict query operators were not satisfied
-					/*
-					if ( $exact_mode && array_sum($temp_strict_lookup) !== 0 ) 
-					{
-						#echo "no exact match for doc id $doc_id \n";
-						continue;
-					}
-					else if ( $this->matchmode === PMB_MATCH_STRICT && !$exact_match )
-					{
-						continue;
-					}*/
-					
-					
-					
-					# skip the final score calculation phase if we are sorting by an external attribute
-					/*
-					if ( $exact_mode && $disable_score_calculation )
-					{
-						if ( $total_matches > 1 ) $temp_doc_id_sql .= ",";
-						$temp_doc_id_sql .= $doc_id;	
-						continue;
-					}*/
 
 					$phrase_score 	= 0;
 					$bm25_score 	= 0;
@@ -1617,8 +1613,7 @@ class PickMyBrain
 											$exact_ids_lookup_copy[$index] = 0;
 										}
 									}
-								}
-								
+								}	
 							}
 							
 							# this field satisfies the strict matchmode requirements
@@ -1684,7 +1679,6 @@ class PickMyBrain
 						$effective_match_count = $weighted_score_lookup[$value[0]] + $value[3] - $weighted_bit_counts[$value[0]];
 						
 						#if ( $effective_match_count == 0 ) echo "effcount 0 for $doc_id <br>";
-
 						$bm25_score		+= log(($this->documents_in_collection - $sumcounts[$vind] + 1) / $sumcounts[$vind]) / ((1 + 1.2/$effective_match_count) * log(1+$this->documents_in_collection));
 					}
 		
@@ -2250,8 +2244,7 @@ class PickMyBrain
 			{	
 				$ext_docinfo_start = microtime(true);
 			
-				$docsql		= "SELECT ID as doc_id, SUBSTRING(field0, 1, 150) AS title, URL, field1 AS content FROM PMBDocinfo WHERE ID IN (".implode(",", array_keys($this->result["matches"])).")";
-				$docsql 	= str_replace($find, $repl, $docsql);
+				$docsql		= "SELECT ID as doc_id, SUBSTRING(field0, 1, 150) AS title, URL, field1 AS content FROM PMBDocinfo".$this->suffix." WHERE ID IN (".implode(",", array_keys($this->result["matches"])).")";
 				$docpdo 	= $this->db_connection->query($docsql);
 
 				while ( $row = $docpdo->fetch(PDO::FETCH_ASSOC) )

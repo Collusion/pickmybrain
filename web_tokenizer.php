@@ -132,7 +132,7 @@ try
 	$connection->query("SET NAMES UTF8");
 	
 	# check current indexing state
-	$ind_state = $connection->prepare("SELECT current_state, updated, documents FROM PMBIndexes WHERE ID = ?");
+	$ind_state = $connection->prepare("SELECT current_state, updated, documents, delta_documents, latest_rotation, max_id FROM PMBIndexes WHERE ID = ?");
 	$ind_state->execute(array($index_id));
 	
 	if ( $row = $ind_state->fetch(PDO::FETCH_ASSOC) )
@@ -148,6 +148,9 @@ try
 			die("too soon");
 		}
 		
+		$min_doc_id = (int)$row["max_id"]+1;
+		$delta_document_start_count = (int)$row["delta_documents"];
+		
 		if ( $row["documents"] > 0 )
 		{
 			$clean_slate = false;
@@ -157,14 +160,46 @@ try
 	{
 		die("Unknown index id $index_id");
 	}
-	
-	
+
 	# update current indexing state to true ( 1 ) 
 	SetProcessState($index_id, $process_number, 1);
 	SetIndexingState(1, $index_id);
 	
 	$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP() WHERE ID = ?");
 	$upd_state->execute(array($index_id));
+	
+	# delta index rotation interval
+	if ( !empty($delta_indexing) && !$clean_slate )
+	{
+		if ( (!empty($delta_merge_interval) && time() - ($delta_merge_interval*60) > $row["latest_rotation"]) || !empty($manual_delta_merge) )
+		{
+			# delta index doesn't exist/is empty
+			if ( $delta_document_start_count === 0 ) 
+			{
+				if ( !empty($manual_delta_merge) )
+				{
+					SetIndexingState(0, $index_id);
+					SetProcessState($index_id, $process_number, 0);	
+					die("delta index merging requested, but there is nothing to merge ( delta index is empty ). Quitting now...\n");
+				}
+			}
+			else
+			{
+				echo "MERGING INDEX NOW\n";
+				# temporarily disable delta indexing and switch to replace index
+				$delta_indexing = null;
+				$replace_index = null;
+				
+				# if we are not delta-indexing, then this should not be harmful in any way
+				$connection->query("DELETE FROM PMBDocinfo".$index_suffix." WHERE ID > (SELECT max_id FROM PMBIndexes WHERE ID = $index_id)");
+			}
+		}
+	}
+	else
+	{
+		# if we are not delta-indexing, then this should not be harmful in any way
+		$connection->query("DELETE FROM PMBDocinfo".$index_suffix." WHERE ID > (SELECT max_id FROM PMBIndexes WHERE ID = $index_id)");
+	}
 	
 	$data_dir_sql = "";
 	if ( !empty($mysql_data_dir) )
@@ -175,8 +210,10 @@ try
 	if ( isset($purge_index) )
 	{
 		$clean_slate = true;
-		$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix;
-							   UPDATE PMBIndexes SET documents = 0 WHERE ID = $index_id;");
+		$delta_indexing = null;
+		$replace_index = null;
+		$connection->exec("TRUNCATE TABLE PMBDocinfo$index_suffix");
+		$connection->query("UPDATE PMBIndexes SET documents = 0, delta_documents = 0, max_id = 0 WHERE ID = $index_id");
 	}
 	else if ( !empty($replace_index) )
 	{
@@ -196,6 +233,7 @@ try
 							 checksum binary(16) NOT NULL,
 							 attr_domain int(10) unsigned NOT NULL,
 							 PRIMARY KEY (ID),
+							 KEY avgsentiscore (avgsentiscore),
 							 KEY attr_category (attr_category),
 							 KEY url_checksum (url_checksum)
 							) ENGINE=INNODB DEFAULT CHARSET=utf8 $innodb_row_format_sql $data_dir_sql");	
@@ -204,11 +242,48 @@ try
 	$temporary_table_type = "ENGINE=MYISAM DEFAULT CHARSET=utf8 ROW_FORMAT=FIXED $data_dir_sql";
 
 	# choose correct target table for document info
+	$doc_counter_target_column = "documents";
 	$docinfo_target_table = "PMBDocinfo$index_suffix";
 	if ( !empty($replace_index) )
 	{
 		$docinfo_target_table = "PMBDocinfo".$index_suffix."_temp";
 		$clean_slate = true;
+	}
+	else if ( (!empty($delta_indexing) && !$clean_slate) || !empty($delta_mode) )
+	{
+		$docinfo_target_table = "PMBDocinfo".$index_suffix."_delta";
+		$doc_counter_target_column = "delta_documents";
+
+		# create the table if it doesn't already exist! 
+		if ( $process_number === 0 ) 
+		{
+			try
+			{
+				$connection->query("UPDATE PMBIndexes SET $doc_counter_target_column = 0 WHERE ID = $index_id");
+				$connection->query("DROP TABLE IF EXISTS $docinfo_target_table");
+				$connection->query("CREATE TABLE IF NOT EXISTS $docinfo_target_table (
+									ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
+									URL varbinary(500) NOT NULL,
+									url_checksum binary(16) NOT NULL,
+									token_count varchar(60) NOT NULL,
+									avgsentiscore tinyint(4) DEFAULT '0',
+									attr_category tinyint(3) unsigned DEFAULT NULL,
+									field0 varbinary(255) NOT NULL,
+									field1 varbinary(10000) NOT NULL,
+									field2 varbinary(255) NOT NULL,
+									field3 varbinary(255) NOT NULL,
+									attr_timestamp int(10) unsigned NOT NULL,
+									checksum binary(16) NOT NULL,
+									attr_domain int(10) unsigned NOT NULL,
+									PRIMARY KEY (ID),
+									KEY url_checksum (url_checksum)	
+									) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql AUTO_INCREMENT=$min_doc_id");
+			}
+			catch ( PDOException $e ) 
+			{
+				echo "Creating docinfo delta table failed :( \n";
+			}
+		}
 	}
 
 	$senti_sql_column = "";
@@ -979,16 +1054,33 @@ while ( !empty($url_list[$lp]) )
 		# if there are proper links, investigate
 		if ( !empty($temp_links) )
 		{
+			$t_sql = "";
+			foreach ( $temp_links as $bin_md5 => $source ) 
+			{
+				$t_sql .= ",".$connection->quote($bin_md5);
+			}
+			$t_sql[0] = " ";
+			
+			if ( !empty($delta_indexing) && !$clean_slate )
+			{
+				$linksql = "(
+							SELECT url_checksum FROM $docinfo_target_table WHERE url_checksum IN ($t_sql)
+							)
+							UNION ALL
+							(
+							SELECT url_checksum FROM PMBDocinfo$index_suffix WHERE url_checksum IN ($t_sql) AND ID < $min_doc_id
+							)";
+			}
+			else
+			{
+				$linksql = "SELECT url_checksum FROM $docinfo_target_table WHERE url_checksum IN ($t_sql)";
+			}
+
+
 			try
 			{	
-				$linkpdo = $connection->prepare("SELECT ID, 
-												URL, 
-												checksum, 
-												url_checksum
-												FROM $docinfo_target_table 
-												WHERE url_checksum IN ( " . implode(", ", array_fill(0, count($temp_links), "?")) . " )");
-				$linkpdo->execute(array_keys($temp_links));
-				
+				$linkpdo = $connection->query($linksql);
+
 				while ( $row = $linkpdo->fetch(PDO::FETCH_ASSOC) )
 				{
 					unset($temp_links[$row["url_checksum"]]);
@@ -1004,7 +1096,7 @@ while ( !empty($url_list[$lp]) )
 			}
 			catch ( PDOException $e ) 
 			{
-				echo $e->getMessage();
+				echo "linkpdo: " . $e->getMessage();
 				$log .= $e->getMessage();
 				return;
 			}
@@ -1043,8 +1135,22 @@ while ( !empty($url_list[$lp]) )
 	
 	try
 	{
-		# this checksum is the checksum for content, not url
-		$checksumpdo = $connection->prepare("SELECT LOWER(HEX(checksum)) as checksum FROM $docinfo_target_table WHERE url_checksum = UNHEX(MD5(:url))");	
+		if ( !empty($delta_indexing) && !$clean_slate )
+		{
+			$checksumsql = "(
+							SELECT url_checksum FROM $docinfo_target_table WHERE url_checksum = UNHEX(MD5(:url))
+							)
+							UNION ALL
+							(
+							SELECT url_checksum FROM PMBDocinfo$index_suffix WHERE url_checksum = UNHEX(MD5(:url)) AND ID < $min_doc_id
+							)";
+		}
+		else
+		{
+			$checksumsql = "SELECT url_checksum FROM $docinfo_target_table WHERE url_checksum = UNHEX(MD5(:url))";
+		}
+		
+		$checksumpdo = $connection->prepare($checksumsql);
 		$checksumpdo->execute(array(":url" => $url));
 		$db_md5_checksum = "";
 		
@@ -1252,7 +1358,7 @@ while ( !empty($url_list[$lp]) )
 						temp_loads = temp_loads + $awaiting_writes,
 						updated = UNIX_TIMESTAMP(),
 						current_state = 1,
-						documents = documents + $awaiting_writes
+						$doc_counter_target_column = $doc_counter_target_column + $awaiting_writes
 						WHERE ID = $index_id");
 						
 			$docinfo_time_start = microtime(true);
@@ -1383,7 +1489,7 @@ try
 					temp_loads = temp_loads + $awaiting_writes,
 					updated = UNIX_TIMESTAMP(),
 					temp_loads_left = 0,
-					documents = documents + $awaiting_writes
+					$doc_counter_target_column = $doc_counter_target_column + $awaiting_writes
 					WHERE ID = $index_id");
 					
 		$docinfo_time_start = microtime(true);
@@ -1485,13 +1591,14 @@ if ( $test_mode )
 # if no new data was indexed
 if ( $indexed_docs === 0 ) 
 {
+	SetIndexingState(0, $index_id);
+	sleep(1);
 	echo "No new data to index!\n";
 	$timer_end = microtime(true) - $timer;
 	echo "The whole operation took $timer_end seconds \n";
 	echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 	echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
-	SetIndexingState(0, $index_id);
-	return;
+	die("Quitting now. Bye!\n");
 }
 
 # start prefix creation
@@ -1560,7 +1667,7 @@ echo "----------------------------------------\nReading and tokenizing data took
 SetIndexingState(3, $index_id);
 
 # run token compressor
-if ( $clean_slate )
+if ( $clean_slate || !empty($delta_indexing) )
 {
 	require_once("token_compressor.php");
 }
@@ -1572,7 +1679,7 @@ else
 $tokens_end = microtime(true) - $tokens_start;
 
 # rum prefix compressor
-if ( $clean_slate ) 
+if ( $clean_slate || !empty($delta_indexing) ) 
 {
 	require_once("prefix_compressor.php");
 }
@@ -1581,42 +1688,8 @@ else
 	require_once("prefix_compressor_merger.php");
 }
 
-# reset temporary variables
-try
-{
-	if ( !empty($replace_index) )
-	{
-		$drop_start = microtime(true);
-		$connection->beginTransaction();
-		# delete old docinfo table and replace it with the new one
-		$connection->query("DROP TABLE PMBDocinfo$index_suffix");
-		$connection->query("ALTER TABLE $docinfo_target_table RENAME TO PMBDocinfo$index_suffix");
-		# delete old docinfo table and replace it with the new one
-		$connection->query("DROP TABLE PMBTokens$index_suffix");
-		$connection->query("ALTER TABLE PMBTokens".$index_suffix."_temp RENAME TO PMBTokens$index_suffix");
-		# delete old docinfo table and replace it with the new one
-		$connection->query("DROP TABLE PMBPrefixes$index_suffix");
-		$connection->query("ALTER TABLE PMBPrefixes".$index_suffix."_temp RENAME TO PMBPrefixes$index_suffix");
-		
-		$connection->query("UPDATE PMBIndexes SET documents = ( SELECT COUNT(ID) FROM PMBDocinfo$index_suffix ) WHERE ID = $index_id");
-		$connection->commit();
-		$drop_end = microtime(true) - $drop_start;
-		
-		echo "Replacing old tables with new ones took $drop_end seconds \n";
-	}
-	
-	
-	$connection->query("UPDATE PMBIndexes SET 
-						current_state = 0, 
-						temp_loads = 0, 
-						temp_loads_left = 0
-						WHERE ID = $index_id ");
-}
-catch ( PDOException $e ) 
-{
-	$connection->rollBack();
-	echo "An error occurred when switching tables : " . $e->getMessage() . "\n";
-}
+# finalize index / ( switch tables etc )
+require("finalization.php");
 
 $timer_end = microtime(true) - $timer;
 echo "The whole operation took $timer_end seconds \n";

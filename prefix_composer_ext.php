@@ -100,11 +100,7 @@ try
 	{
 		$min_dictionary_id = 0;
 	}
-	else
-	{
-		++$min_dictionary_id;
-	}
-	
+
 	if ( $max_temp_id == $min_dictionary_id )
 	{
 		echo "No new prefixes to create ...\n";
@@ -128,7 +124,7 @@ try
 
 	if ( $dist_threads === 1 ) 
 	{
-		$where_sql = "";
+		$where_sql = "LIMIT $start_id, 9999999999";
 	}
 
 	$maximum_prefix_len 	= 20;
@@ -165,6 +161,8 @@ try
 	
 	$write_buffer = array();
 	$pdo = $unbuffered_connection->query("SELECT token FROM PMBtoktemp$index_suffix $where_sql");
+	
+	echo "Prefix composer sql: SELECT token FROM PMBtoktemp$index_suffix $where_sql \n";
 	
 	while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) ) 
 	{	

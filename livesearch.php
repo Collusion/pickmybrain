@@ -43,6 +43,8 @@ if ( !empty($_GET["q"]) )
 	
 	# the index name can be defined with the constructor or later on with SetIndex-method
 	$pickmybrain = new PickMyBrain($index_name); 
+	
+	$pickmybrain->SetSortMode(PMB_SORTBY_POSITIVITY);
 
 	$result = $pickmybrain->Search($_GET["q"], $offset, $slots);
 	

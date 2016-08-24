@@ -99,10 +99,6 @@ try
 	{
 		$min_dictionary_id = 0;
 	}
-	else
-	{
-		++$min_dictionary_id;
-	}
 	
 	# if we have encountered (enough) new tokens disable indexes
 	if ( $max_temp_id > $min_dictionary_id + 1000 ) 
@@ -139,7 +135,7 @@ try
 
 	if ( $dist_threads == 1 ) 
 	{
-		$where_sql = "";
+		$where_sql = "LIMIT $start_id, 9999999999";
 	}
 
 	$maximum_prefix_len 	= 20;

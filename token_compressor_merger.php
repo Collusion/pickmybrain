@@ -699,17 +699,16 @@ try
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
 
-	if ( !$clean_slate )
-	{
-		$drop_start = microtime(true);
-		$connection->beginTransaction();
+	
+	$drop_start = microtime(true);
+	$connection->beginTransaction();
 		# remove the old table and rename the new one
-		$connection->query("DROP TABLE $clean_slate_target");
-		$connection->query("ALTER TABLE $target_table RENAME TO $clean_slate_target");
+	$connection->query("DROP TABLE $clean_slate_target");
+	$connection->query("ALTER TABLE $target_table RENAME TO $clean_slate_target");
 		
-		$connection->commit();
-		$drop_end = microtime(true) - $drop_start;
-	}
+	$connection->commit();
+	$drop_end = microtime(true) - $drop_start;
+	
 	
 }
 catch ( PDOException $e ) 

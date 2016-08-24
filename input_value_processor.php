@@ -21,6 +21,8 @@ $supported_commands = array("index_id" 			=> 1,
 							"usermode" 			=> 1,
 							"replace" 			=> 1,
 							"purge" 			=> 1,
+							"delta" 			=> 1,
+							"merge" 			=> 1,
 							"data_partition" 	=> 1,
 							"process_number" 	=> 1,
 							"rebuildprefixes" 	=> 1,
@@ -74,6 +76,16 @@ if ( !empty($_GET) )
 	if ( isset($_GET["replace"]) )
 	{
 		$replace_index = true;
+	}
+	
+	if ( isset($_GET["delta"]) )
+	{
+		$delta_mode = true;
+	}
+	
+	if ( isset($_GET["merge"]) )
+	{
+		$manual_delta_merge = true;
 	}
 }
 # script launched by command line / exec()
@@ -134,8 +146,16 @@ else if ( !empty($argv) )
 					$user_mode = true;
 					break;
 					
+					case 'delta':
+					$delta_mode = true;
+					break;
+					
 					case 'purge';
 					$purge_index = true;
+					break;
+					
+					case 'merge';
+					$manual_delta_merge = true;
 					break;
 					
 					case 'replace';

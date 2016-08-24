@@ -66,6 +66,109 @@ function execInBackground($cmd)
     }
 }
 
+function checkPMBIndexes()
+{
+	$table_sql = "CREATE TABLE PMBIndexes (
+	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
+	 name varbinary(20) NOT NULL,
+	 type tinyint(3) unsigned NOT NULL,
+	 comment varbinary(255) NOT NULL,
+	 documents int(10) unsigned NOT NULL DEFAULT '0',
+	 max_id int(10) unsigned NOT NULL DEFAULT '0',
+  	 delta_documents int(10) unsigned NOT NULL DEFAULT '0',
+	 latest_rotation int(10) unsigned NOT NULL DEFAULT '0',
+	 updated int(10) unsigned NOT NULL,
+	 indexing_permission tinyint(3) unsigned NOT NULL,
+	 indexing_started int(10) unsigned NOT NULL,
+	 current_state tinyint(3) unsigned NOT NULL,
+	 temp_loads int(8) unsigned NOT NULL,
+	 temp_loads_left int(8) unsigned NOT NULL,
+	 PRIMARY KEY (ID),
+	 UNIQUE KEY name (name)
+	) ENGINE=MYISAM DEFAULT CHARSET=utf8";
+	
+	$required_columns = array(
+	"ID" 				=> "ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT",
+	"name" 				=> "name varbinary(20) NOT NULL",
+	"type" 				=> "type tinyint(3) unsigned NOT NULL",
+	"comment" 			=> "comment varbinary(255) NOT NULL",
+	"documents" 		=> "documents int(10) unsigned NOT NULL DEFAULT '0'",
+	"max_id" 			=> "max_id int(10) unsigned NOT NULL DEFAULT '0'",
+	"delta_documents" 	=> "delta_documents int(10) unsigned NOT NULL DEFAULT '0'",
+	"latest_rotation" 	=> "latest_rotation int(10) unsigned NOT NULL DEFAULT '0'",
+	"updated"			 => "updated int(10) unsigned NOT NULL",
+	"indexing_permission" => "indexing_permission tinyint(3) unsigned NOT NULL",
+	"indexing_started" 	=> "indexing_started int(10) unsigned NOT NULL",
+	"current_state" 	=> "current_state tinyint(3) unsigned NOT NULL",
+	"temp_loads" 		=> "temp_loads int(8) unsigned NOT NULL",
+	"temp_loads_left" 	=> "temp_loads_left int(8) unsigned NOT NULL"
+	);
+	
+	try
+	{
+		$connection = db_connection();
+		
+		# table doesn't exist, create it ! 
+		if ( !$connection->query("SHOW TABLES LIKE 'PMBIndexes'")->rowCount() )
+		{
+			$connection->query($table_sql);
+			
+			# no need to alter the table after this
+			return true;
+		}
+		
+		# if table already existed, check that it has all the required columns
+		$pdo = $connection->query("SELECT * FROM PMBIndexes LIMIT 1");
+		
+		if ( $row = $pdo->fetch(PDO::FETCH_ASSOC) )
+		{
+		}
+		else
+		{
+			# table is empty, insert a dummy row now!
+			$connection->query("INSERT INTO PMBIndexes () VALUES ()");
+			$pdo = $connection->query("SELECT * FROM PMBIndexes LIMIT 1");
+			$row = $pdo->fetch(PDO::FETCH_ASSOC);
+			$connection->query("TRUNCATE TABLE PMBIndexes");
+		}
+		
+		# now check each column 
+		foreach ( $row as $column_name => $value ) 
+		{
+			if ( !isset($required_columns[$column_name]) )
+			{
+				# this column does not need to exist
+				$alter_operations[] = "DROP $column_name";
+			}
+			else
+			{
+				$found_columns[$column_name] = 1;
+			}
+		}
+		
+		foreach ( $required_columns as $column_name => $column_sql )
+		{
+			if ( !isset($found_columns[$column_name]) )
+			{
+				# this column is missing from the table definition, so it has to be added
+				$alter_operations[] = "ADD $column_sql";
+			}
+		}
+		
+		# finally, execute alter operations ( if any exist )
+		if ( !empty($alter_operations) )
+		{
+			$connection->query("ALTER TABLE PMBIndexes " . implode(",", $alter_operations));
+		}
+	}
+	catch ( PDOException $e )
+	{
+		return false;
+	}
+	
+	return true;
+}
+
 function deleteIndex($index_id)
 {
 	if ( empty($index_id) || !is_numeric($index_id) )
@@ -615,6 +718,7 @@ function write_settings(array $settings, $index_id = 0)
 			
 			case 'indexing_interval';
 			case 'update_interval';
+			case 'delta_merge_interval';
 			if ( isset($setting_value) && is_numeric($setting_value) && $setting_value >= 0 ) 
 			{
 				$$setting_name = $setting_value;
@@ -754,6 +858,7 @@ function write_settings(array $settings, $index_id = 0)
 			case 'sentiweight':
 			case 'allow_subdomains':
 			case 'index_pdfs':
+			case 'delta_indexing':
 			if ( isset($setting_value) && $setting_value <= 1 && $setting_value >= 0 )
 			{
 				$$setting_name = $setting_value;
@@ -1084,6 +1189,8 @@ charset				= \"$charset\"
 " . ini_array_value_export("blend_chars", $blend_chars) . "
 " . ini_array_value_export("ignore_chars", $ignore_chars) . "
 separate_alnum			= $separate_alnum
+delta_indexing			= $delta_indexing
+delta_merge_interval	= $delta_merge_interval
 					
 ; runtime
 " . ini_array_value_export("field_weights", $field_weights, true) . "
@@ -1253,7 +1360,7 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 		 checksum binary(16) NOT NULL,
 		 attr_domain int(10) unsigned NOT NULL,
 		 PRIMARY KEY (ID),
-		 KEY attr_category (attr_category),
+		 KEY attr_category (ID, attr_category),
 		 KEY url_checksum (url_checksum)
 		) ENGINE=INNODB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
 	}
@@ -1264,7 +1371,7 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 		 ID int(11) unsigned NOT NULL,
 		 avgsentiscore tinyint(4) NOT NULL,
 		 PRIMARY KEY (ID),
-		 KEY avgsentiscore (avgsentiscore)	
+		 KEY avgsentiscore (ID, avgsentiscore)	
 		) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql";
 	}
 	
@@ -1968,13 +2075,12 @@ function SetProcessState($index_id, $process_number, $process_state)
 		if ( $process_state == 1 ) 
 		{
 			# turn process indicator on
-			$connection->query("UPDATE PMBIndexes SET running_processes = ((1 << $process_number) | running_processes) WHERE ID = $index_id");
+			@unlink($filepath);
 			file_put_contents($filepath, getmypid());
 		}
 		else
 		{
 			# turn process indicator off
-			$connection->query("UPDATE PMBIndexes SET running_processes = ((1 << $process_number) ^ running_processes) WHERE ID = $index_id");
 			@unlink($filepath);
 		}
 		
@@ -1988,13 +2094,12 @@ function SetProcessState($index_id, $process_number, $process_state)
 			if ( $process_state == 1 ) 
 			{
 				# turn process indicator on
-				$connection->query("UPDATE PMBIndexes SET running_processes = ((1 << $process_number) | running_processes) WHERE ID = $index_id");
+				@unlink($filepath);
 				file_put_contents($filepath, getmypid());
 			}
 			else
 			{
 				# turn process indicator off
-				$connection->query("UPDATE PMBIndexes SET running_processes = ((1 << $process_number) ^ running_processes) WHERE ID = $index_id");
 				@unlink($filepath);
 			}
 			

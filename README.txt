@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   0.93 BETA 
-Published: 24.07.2016
+Version:   0.95 BETA 
+Published: 25.08.2016
 
 copyright 2015-2016 Henri Ruutinen 
 
@@ -142,6 +142,10 @@ extra parameters (optional):
 	replace  ( keeps the old indexed data intact until the new indexer
 		   run is 100% completed, starts from scratch ) 
 
+	merge    ( for delta index grow method only; merges the delta index
+		   and the main index together to maintain indexing speed
+		   advantages over time )
+
 OR
 
 3. Run indexer automatically by setting an appropiate indexing interval.
@@ -152,7 +156,8 @@ Tip:
 Pickmybrain supports gradually growing indexes. This means you can add 
 new documents into your search index simply by running the indexer again.
 In cases like these Pickmybrain will merge the old already compressed
-data with the new data. If you wish to merge new data into existing data, 
+data with the new data OR create a parallel delta-index which is also
+queried while searching. If you wish to merge new data into existing data, 
 do not invoke the indexer with purge or replace parameter.
 
 Unfortunately Pickmybrain does not support modifying of already indexed data.
@@ -194,6 +199,7 @@ File purpose definitions
 ------------------------
 
 autoload_settings.php		Loads and parses .txt configuration files
+autostop.php			Checks whether any new data was actually indexed and stops execution if necessary 
 clisetup.php			command-line control panel
 clisearch.php			command-line search utility
 control.php             	the web control panel
@@ -202,6 +208,7 @@ db_connection.php		this file defines how PHP is supposed to connect to your data
 db_tokenizer.php		database indexer
 db_tokenizer_ext.php		same as above, but uses external linux sort		
 ext_db_connection.php		(optional) this file defines an external read-only database for database indexes
+finalization.php		
 indexer.php			to launch an indexing process, call this file with correct params
 input_value_processor.php	processes parameters for indexer, db_tokenizer and web_tokenizer
 livesearch.php			PHP backend file for the live search feature

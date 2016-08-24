@@ -292,37 +292,12 @@ try
 		}
 	}
 	
-	$create_table["PMBIndexes"] = "CREATE TABLE PMBIndexes (
-	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-	 name varbinary(20) NOT NULL,
-	 type tinyint(3) unsigned NOT NULL,
-	 comment varbinary(255) NOT NULL,
-	 documents int(10) unsigned NOT NULL DEFAULT '0',
-	 updated int(10) unsigned NOT NULL,
-	 indexing_permission tinyint(3) unsigned NOT NULL,
-	 indexing_started int(10) unsigned NOT NULL,
-	 current_state tinyint(3) unsigned NOT NULL,
-	 running_processes smallint(5) unsigned NOT NULL,
-	 temp_loads int(8) unsigned NOT NULL,
-	 temp_loads_left int(8) unsigned NOT NULL,
-	 PRIMARY KEY (ID,type,documents,current_state,updated,indexing_permission),
-	 UNIQUE KEY name (name),
-	 UNIQUE KEY ID (ID)
-	) ENGINE=MYISAM DEFAULT CHARSET=utf8";
 	
-	try
-	{		
-		# table doesn't exist, create it ! 
-		if ( !$connection->query("SHOW TABLES LIKE 'PMBIndexes'")->rowCount() )
-		{
-			$connection->query($create_table["PMBIndexes"]);
-		}
-	}
-	catch ( PDOException $e ) 
+	if ( !checkPMBIndexes() )
 	{
 		++$errors;
 		echo "<div class='errorbox'>
-			<h3 style='color:#ff0000;'>Error: table PMBIndexes could not be created.</h3>
+			<h3 style='color:#ff0000;'>Error: table PMBIndexes could not be created or modified.</h3>
 			<p>".$e->getMessage()."</p>
 		  </div>";
 	}
@@ -668,6 +643,9 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 				$connection->beginTransaction();		
 				$connection->query("UPDATE PMBIndexes SET 
 									documents = 0,
+									max_id = 0,
+									delta_documents = 0,
+									latest_rotation = 0,
 									current_state = 0,
 									indexing_permission = 0,
 									indexing_started = 0,
@@ -684,8 +662,9 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 									TRUNCATE TABLE PMBDocinfo$index_suffix;
 									TRUNCATE TABLE PMBPrefixes$index_suffix;
 									TRUNCATE TABLE PMBTokens$index_suffix;
-									TRUNCATE TABLE PMBMatches$index_suffix;
-									TRUNCATE TABLE PMBDocMatches$index_suffix;
+									DROP TABLE IF EXISTS PMBTokens".$index_suffix."_delta;
+									DROP TABLE IF EXISTS PMBPrefixes".$index_suffix."_delta;
+									DROP TABLE IF EXISTS PMBDocinfo".$index_suffix."_delta;
 									SET FOREIGN_KEY_CHECKS=1;");
 									
 				$connection->query("UPDATE PMBCategories$index_suffix SET count = 0");
@@ -874,7 +853,7 @@ Hi there! Start configuration of your Pickmybrain search engine by selecting an 
 				echo "<a style='width:100%;clear:both;display:inline-block;' href='control.php?index_id=" . $row["ID"] . "'>
 					   <div style='width:23%;float:left;padding:2px 2% 2px 0%;'>" . $row["name"] . "</div>
 					   <div style='width:23%;float:left;padding:2px 2% 2px 0%;'>$type</div>
-					    <div style='width:23%;float:left;padding:2px 2% 2px 0%;'>" . $row["documents"] . "</div>
+					    <div style='width:23%;float:left;padding:2px 2% 2px 0%;'>" . ($row["documents"]+$row["delta_documents"]) . "</div>
 						<div style='width:23%;float:left;padding:2px 2% 2px 0%;'>$latest_update</div>
 						$wheel
 						</a>";
@@ -1087,6 +1066,7 @@ try
 	if ( $row = $statepdo->fetch(PDO::FETCH_ASSOC) )
 	{
 		$doc_count 				= (int)$row["documents"];
+		$delta_doc_count		= (int)$row["delta_documents"];
 		$indexing_permission 	= (int)$row["indexing_permission"];
 		$indexing_state 		= (int)$row["current_state"];
 		
@@ -1108,6 +1088,8 @@ try
 		{
 			$indexing_time = ", " .  (time() - $row["indexing_started"]) . " seconds elapsed";
 		}
+		
+		$total_documents = $doc_count + $delta_doc_count;
 	}
 	
 	$run_indexer_button = "";
@@ -1216,9 +1198,18 @@ try
 				<input type='button' style='display:inline-block;position:absolute;right:0;top:0;' value='Search' onClick='TogglePMBSearch();' />
 				<div style='display:inline-block;position:absolute;right:15px;top:60px;color:#222;'>CTRL+Q</div>
 				<h3>Index name: <span class='green'>$index_name</span> id: <span class='grey'>$index_id</span></h3>
-				<h3>Index type: <span class='grey'>$index_type_desc</span></h3>
-				<h3>Total indexed documents: $doc_count</h3>
-				<h3>Indexer state: $state</h3>
+				<h3>Index type: <span class='grey'>$index_type_desc</span></h3>";
+				
+				if ( $delta_indexing == 1 ) 
+				{
+					echo "<h3>Total indexed documents: $total_documents (main: $doc_count delta: $delta_doc_count)</h3>";
+				}
+				else
+				{
+					echo "<h3>Total indexed documents: $total_documents</h3>";
+				}
+				
+		echo"<h3>Indexer state: $state</h3>
 			</div>
 			$test_indexer_button
 			$run_indexer_button
@@ -1345,6 +1336,16 @@ if ( !empty($index_pdfs) )
 else
 {
 	$index_pdfs_0 = "checked";
+}
+
+$delta_indexing_0 = $delta_indexing_1 = "";
+if ( !empty($delta_indexing) )
+{
+	 $delta_indexing_1 = "checked";
+}
+else
+{
+	$delta_indexing_0 = "checked";
 }
 
 $sentiment_analysis_0 = $sentiment_analysis_1 = $sentiment_analysis_2 = $sentiment_analysis_1001 = "";
@@ -2131,6 +2132,35 @@ catch ( PDOException $e )
 		
 		?>
         </select>
+    </p>
+</div>
+
+<div class='settingsbox'>
+    <h3>Index grow method</h3>
+    <p>
+    	Pickmybrain supports gradually growing indexes. This means you can add 
+		new documents into your existing search index simply by running the indexer again. 
+        This settings chooses whether the new documents are merged with the existing data or whether a paraller delta index containing the new data is created.  
+    </p>
+    <p>
+    	<b>Merge-method</b>: Slower indexing performance, best search performance. 
+        <br>
+        <b>Delta-method</b>: Best indexing performance, somewhat slower search performance ( MySQL 5.7.3 or later recommended for best search performance )
+    </p>
+    <p>
+        <input type="radio" name='delta_indexing' value='0' <?php echo $delta_indexing_0; ?> /> Merge-method
+        <br />
+   		<input type="radio" name='delta_indexing' value='1' <?php echo $delta_indexing_1; ?> /> Delta-method 
+    </p>
+    <p><b>Delta merge interval</b></p>
+    <p>
+    	If enabled, at some point the delta index must be merged into the main index to maintain the indexing speed advantages.
+        This can be done automatically at certain point if you define a delta merge interval value. 
+        Otherwise the indexes must be merged manually by running the indexer with <i>merge</i> parameter, or else the delta index will keep growing indefinitely.
+        <br>0 = disabled, > 0 minutes from the last full indexing / merging.
+    </p>
+    <p>
+    	<input name='delta_merge_interval' type='text' value='<?php echo htmlentities($delta_merge_interval, ENT_QUOTES); ?>' style='width:100px;' /> minutes</p>  
     </p>
 </div>
 
