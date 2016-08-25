@@ -44,8 +44,6 @@ if ( !empty($_GET["q"]) )
 	# the index name can be defined with the constructor or later on with SetIndex-method
 	$pickmybrain = new PickMyBrain($index_name); 
 	
-	$pickmybrain->SetSortMode(PMB_SORTBY_POSITIVITY);
-
 	$result = $pickmybrain->Search($_GET["q"], $offset, $slots);
 	
 	#echo "Final Memory usage: " . memory_get_usage()/1024/1024 . " MB"; 				# for debugging

@@ -1,4 +1,4 @@
-<?php
+php<?php
 
 /* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
@@ -185,7 +185,6 @@ try
 			}
 			else
 			{
-				echo "MERGING INDEX NOW\n";
 				# temporarily disable delta indexing and switch to replace index
 				$delta_indexing = null;
 				$replace_index = null;

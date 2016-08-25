@@ -209,7 +209,6 @@ try
 				}
 				else
 				{
-					echo "MERGING INDEX NOW\n";
 					# temporarily disable delta indexing and switch to replace index
 					$delta_indexing = null;
 					$replace_index = null;
