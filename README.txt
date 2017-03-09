@@ -4,7 +4,7 @@ Pickmybrain
 Version:   0.96 BETA 
 Published: 03.03.2017
 
-copyright 2015-2016 Henri Ruutinen 
+copyright 2015-2017 Henri Ruutinen 
 
 email: henri.ruutinen@pickmybra.in
 website: http://www.pickmybra.in
