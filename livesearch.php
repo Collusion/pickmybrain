@@ -11,6 +11,7 @@
 
 ini_set("display_errors", 1);
 error_reporting(E_ALL);
+set_time_limit(10);
 
 /*
 livesearch.php
@@ -45,9 +46,6 @@ if ( !empty($_GET["q"]) )
 	$pickmybrain = new PickMyBrain($index_name); 
 	
 	$result = $pickmybrain->Search($_GET["q"], $offset, $slots);
-	
-	#echo "Final Memory usage: " . memory_get_usage()/1024/1024 . " MB"; 				# for debugging
-	#echo "Final Memory usage (peak): " . memory_get_peak_usage()/1024/1024 . " MB";	# for debugging
 
 	if ( !empty($result["matches"]) )
 	{

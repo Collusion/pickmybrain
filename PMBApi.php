@@ -93,6 +93,7 @@ class PickMyBrain
 	private $index_state;
 	private $latest_indexing_done;
 	private $query_start_time;
+	private $temp_matches;
 		
 	public function __construct($index_name = "")
 	{
@@ -167,6 +168,7 @@ class PickMyBrain
 		$this->enable_exec			= $enable_exec;
 		$this->indexing_interval	= $indexing_interval;
 		$this->max_results			= 1000;
+		$this->temp_grouper_size	= 10000;
 		$this->charset_regexp		= "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "*\"]/u";
 		$this->result				= array();
 		$this->current_index		= $index_id;
@@ -352,6 +354,70 @@ class PickMyBrain
 		curl_close( $ch );
 		
 		return $content;
+	}
+	
+	
+	private function GroupTemporaryResults()
+	{
+		# if grouping is enabled, temporary results will be grouped in this function
+		if ( $this->groupmode > 1 && !empty($this->temp_matches) ) 
+		{
+			# we are this function because grouping is done on some attribute
+			# but group sort is done with virual attribute ( score or sentiscore )
+			$grouping_attribute = "attr_".$this->group_attr;
+			$sql = "";
+
+			foreach ( $this->temp_matches as $doc_id => $score ) 
+			{
+				$sql .= ",$doc_id";	
+			}
+			
+			$sql[0] = " ";
+			
+			try
+			{
+				# disable buffered queries
+				$this->db_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+				
+				# query documents
+				$pdo = $this->db_connection->query("SELECT ID, $grouping_attribute FROM PMBDocinfo".$this->suffix." WHERE ID IN($sql)");
+				
+				$temporary_grouper = array();
+				$temporary_docids  = array();
+				
+				while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) )
+				{
+					$doc_id 		= +$row["ID"];
+					$grouping_value = +$row[$grouping_attribute]; 
+					$score 			= $this->temp_matches[$doc_id];
+					
+					if ( !empty($temporary_grouper[$grouping_value]) && $score >= $temporary_grouper[$grouping_value]  )
+					{
+						# grouping value already exists; but this is better result
+						$temporary_grouper[$grouping_value] = $score;
+						$temporary_docids[$grouping_value] = $doc_id;
+						unset($this->temp_matches[$doc_id]);
+					}
+					else
+					{
+						# new grouping value
+						$temporary_grouper[$grouping_value] = $score;
+						$temporary_docids[$grouping_value] = $doc_id;
+					}
+				}
+
+				# rewrite temp_matches
+				foreach ( $temporary_grouper as $grouping_value => $score ) 
+				{
+					$doc_id = $temporary_docids[$grouping_value];
+					$this->temp_matches[$doc_id] = $score;
+				}
+			}
+			catch ( PDOException $e ) 
+			{
+				echo $e->getMessage();
+			}
+		}
 	}
 	
 	private function utf8_to_extended_ascii($str, &$map)
@@ -561,7 +627,7 @@ class PickMyBrain
 		
 		if ( !empty($this->filter_by_range) )
 		{
-			foreach ( $this->filter_by as $column => $filter_value_list ) 
+			foreach ( $this->filter_by_range as $column => $filter_value_list ) 
 			{
 				if ( $column[0] === "!" )
 				{
@@ -958,12 +1024,13 @@ class PickMyBrain
 		
 					$delta = 1;
 					$len = strlen($row["tok_data"]);
+					$binary_data = &$row["tok_data"];
 					$temp = 0;
 					$shift = 0;
 				
 					for ( $i = 0 ; $i < $len ; ++$i )
 					{
-						$bits = $this->hex_lookup_decode[$row["tok_data"][$i]];
+						$bits = $this->hex_lookup_decode[$binary_data[$i]];
 						$temp |= (($bits & 127) << $shift*7);
 						++$shift;
 						
@@ -1122,9 +1189,7 @@ class PickMyBrain
 			unset($token_escape, $prefix_data, $token_sql, $tok_checksums, $tok_cutlens);
 
 			$g = 0;
-			
-			#$multiplier_total = 0;
-	
+
 			# group results by token_id and select the min(distance) as keyword score modifier 
 			while ( $row = $tokpdo->fetch(PDO::FETCH_ASSOC) )
 			{	
@@ -1143,11 +1208,12 @@ class PickMyBrain
 					if ( empty($sumdata[$token_order_rev[$row["token"]]]) )
 					{
 						$sumdata[$token_order_rev[$row["token"]]] = array();
+						$sumcounts[$token_order_rev[$row["token"]]] = 0;
 						$summatchcounts[$token_order_rev[$row["token"]]] = array();
 					}
 			
 					$sumdata[$token_order_rev[$row["token"]]][] = $row["ID"]; # store as int because exact match
-					$sumcounts[$token_order_rev[$row["token"]]] = $row["doc_matches"]; # store how many doc_matches this token has
+					$sumcounts[$token_order_rev[$row["token"]]] += $row["doc_matches"]; # store how many doc_matches this token has
 					$summatchcounts[$token_order_rev[$row["token"]]][] = $row["doc_matches"];
 				}
 				# prefix match
@@ -1230,7 +1296,7 @@ class PickMyBrain
 			
 			$this->result["stats"]["payload_time"] = microtime(true) - $payload_start;
 
-			# no matches :(  empty($bm25_data) &&
+			# no matches :( 
 			if ( $tic === 0 )
 			{
 				$this->LogQuery($query, 0); # log query
@@ -1437,7 +1503,19 @@ class PickMyBrain
 				$goal_bits = $required_bits;	
 			}
 			
+			# format a two dimensional array for keyword position calculation
+			$max_token_group = max($token_group_lookup);
+			for ( $g = -1 ; $g <= $max_token_group ; ++$g )
+			{
+				$last_group_positions[$g] = null;
+			}
 			
+			$field_count = count($this->field_weights);
+			for ( $f_id = 0 ; $f_id < $field_count ; ++$f_id )
+			{
+				$last_pos_lookup[1<<$f_id] = $last_group_positions;
+			}
+
 			# sorting by external attribute, no keyword order requirements
 			if ( !$exact_mode && $disable_score_calculation && $this->matchmode !== PMB_MATCH_STRICT )
 			{
@@ -1490,7 +1568,7 @@ class PickMyBrain
 			}
 			
 			asort($sorted_groups);
-
+			
 			$start = microtime(true);
 			$loop = 0;
 			while ( true ) 
@@ -1558,7 +1636,16 @@ class PickMyBrain
 						else
 						{
 							# number ends
-							$delta = ($temp|($bits-128 << $shift*7))+$delta-1;
+							if ( $shift ) 
+							{
+								$delta = ($temp|($bits-128 << $shift*7))+$delta-1;
+								$shift = 0;
+								$temp = 0;
+							}
+							else
+							{
+								$delta = $bits-129+$delta;
+							}
 
 							if ( $delta <= $max_doc_id )
 							{
@@ -1590,9 +1677,6 @@ class PickMyBrain
 
 								break;
 							}
-							
-							$temp = 0;
-							$shift = 0;
 						}
 					}
 					
@@ -1756,20 +1840,22 @@ class PickMyBrain
 							$match_positions 	= explode($bin_sep, $loop_doc_positions[$doc_id]);
 							$match_groups 		= explode(" ", $loop_doc_groups[$doc_id]);	
 							
-							$exact_match = false;
 							unset($best_match_score, $phrase_data, $document_count, $sentiment_data);
 							
-							$phrase_score 	= 0;
-							$bm25_score 	= 0;
-							$self_score 	= 0;
-							$maxscore_total = 0;
-							$sentiscore		= 0;		
+							$phrase_score 		= 0;
+							$bm25_score 		= 0;
+							$self_score 		= 0;
+							$maxscore_total 	= 0;
+							$sentiscore			= 0;
+							$position_storage 	= $last_pos_lookup;	
+							$exact_match 		= false;
 
 							foreach ( $match_positions as $m_i => $match_position ) 
 							{							
 								$t_group 	= +$match_groups[$m_i];
 								$qind		= $sorted_groups[$t_group];
-
+								$prev_group = $qind-1;	
+								
 								if ( !isset($best_match_score[$qind]) )
 								{
 									# initialize temporary array variables for each token group
@@ -1805,72 +1891,54 @@ class PickMyBrain
 										
 										if ( $x < $this->sentiment_index )
 										{
-											# first value is the sentiment score	
-											$sentiment_data[$qind] += (($temp|($bits-128 << $shift*7))&255-128);
+											$sentiment_data[$qind] += ($temp|($bits-128 << $shift*7))-128;
+											$temp = 0;
+											$shift = 0;
 										}
 										else
 										{
 											# otherwise this value is keyword position in document
-											$delta = ($temp|($bits-128 << $shift*7))+$delta-1;
+											if ( $shift ) 
+											{
+												$delta = ($temp|($bits-128 << $shift*7))+$delta-1;
+												$shift = 0;
+												$temp = 0;
+											}
+											else
+											{
+												$delta = $bits-129+$delta;
+											}
+
+											$field_id_bit = 1 << ($delta & $this->lsbits);
+											$field_pos = $delta >> $this->field_id_width;
+
+											# self score match
+											$self_score |= $field_id_bit;
+
+											# if there is a match in the same field 
+											if ( $position_storage[$field_id_bit][$prev_group] === $field_pos-1 )
+											{
+												$phrase_data[$qind] |= $field_id_bit;
+											}
+											# if field_pos is 1 and token group is 0 -> exact match
+											else if ( $field_pos+$qind === 1 ) 
+											{
+												$exact_match = true;
+											}
 											
-											# store field ids and field positions into a multidimensional array
-											$position_list[$delta & $this->lsbits][$delta>>$this->field_id_width] = $qind;
+											$position_storage[$field_id_bit][$qind] = $field_pos;	
 										}
 										
 										++$x;
-										$temp = 0;
-										$shift = 0;
 									}
 								}
 								
-								# increase document count
+								# increase document count ( if sentiment analysis is on, decrement the count by one ) 
 								$document_count[$qind] += $x - $this->sentiment_index;
 							}
 						
-							
 							# now calculate document scores
 							if ( $exact_mode ) $exact_ids_lookup_copy = $exact_ids_lookup;
-							$exact_match = false;
-							
-							#$s = microtime(true);
-							foreach ( $position_list as $field_bits => $field_matches ) 
-							{
-								$last_pos = null;
-								$last_group_id = null;
-								
-								# self score match
-								$token_group_bits = 1 << $field_bits;
-								$self_score |= $token_group_bits;
-
-								foreach ( $position_list[$field_bits] as $field_pos => $token_group_id ) 
-								{
-									if ( $last_pos === $field_pos && $last_group_id+1 === $token_group_id )
-									{
-										# this is a match ! 
-										$phrase_data[$token_group_id] |= $token_group_bits;
-		
-										if ( $exact_mode ) 
-										{
-											$index = $rev_token_group_lookup[$last_group_id] . " " . $rev_token_group_lookup[$token_group_id];
-												
-											if ( !empty($exact_ids_lookup_copy[$index]) )
-											{
-												unset($exact_ids_lookup_copy[$index]);
-											}
-										}	
-									}	
-									# this field satisfies the strict matchmode requirements
-									else if ( $field_pos+$token_group_id === 1 ) 
-									{
-										$exact_match = true;
-									}
-									
-									$last_pos = $field_pos+1;
-									$last_group_id = $token_group_id;
-								}
-							}
-
-							unset($position_list);
 							
 							if ( $exact_mode && !empty($exact_ids_lookup_copy)  )
 							{
@@ -1935,15 +2003,15 @@ class PickMyBrain
 							switch ( $this->rankmode )
 							{
 								case PMB_RANK_PROXIMITY_BM25:
-								$temp_matches[$doc_id] = (int)((($phrase_score + $final_self_score) * 1000 + round((0.5 + $bm25_score / $bm25_token_count) * 999)) * $score_multiplier);
+								$this->temp_matches[$doc_id] = (int)((($phrase_score + $final_self_score) * 1000 + round((0.5 + $bm25_score / $bm25_token_count) * 999)) * $score_multiplier);
 								break;
 								
 								case PMB_RANK_BM25:
-								$temp_matches[$doc_id] = (int)(round((0.5 + $bm25_score / $bm25_token_count) * 999) * $score_multiplier);
+								$this->temp_matches[$doc_id] = (int)(round((0.5 + $bm25_score / $bm25_token_count) * 999) * $score_multiplier);
 								break;
 								
 								case PMB_RANK_PROXIMITY:
-								$temp_matches[$doc_id] = (int)((($phrase_score + $final_self_score) * 1000) * $score_multiplier);
+								$this->temp_matches[$doc_id] = (int)((($phrase_score + $final_self_score) * 1000) * $score_multiplier);
 								break;
 							}
 							
@@ -1959,19 +2027,27 @@ class PickMyBrain
 							if count(temp_matches) > 10000, sort and keep only 1000 best matches
 							*/
 							
-							if ( $total_matches % 10000 === 0 )
+							if ( $total_matches % $this->temp_grouper_size === 0 )
 							{	
 								# sort results
-								arsort($temp_matches);
+								arsort($this->temp_matches);
 								
-								# keep only $this->max_results 
-								$temp_matches = array_slice($temp_matches, 0, $this->max_results, true);
-								
+								/* if grouping is enabled, it should be done at this point*/
+								if ( $this->groupmode > 1 ) 
+								{
+									$this->GroupTemporaryResults();
+								}
+								else
+								{
+									# keep only $this->max_results 
+									$this->temp_matches = array_slice($this->temp_matches, 0, $this->max_results, true);
+								}
+	
 								if ( $sentimode ) 
 								{
 									$t_sentiscores = array();
 									# rewrite sentiment score data
-									foreach ( $temp_matches as $t_doc_id => $doc_score ) 
+									foreach ( $this->temp_matches as $t_doc_id => $doc_score ) 
 									{
 										$t_sentiscores[$t_doc_id] = $temp_sentiscores[$t_doc_id];
 										unset($temp_sentiscores[$t_doc_id]);
@@ -2041,7 +2117,7 @@ class PickMyBrain
 				# no results
 				return $this->result;
 			}
-			
+		
 			/*
 				at this point we know all matching document ids ( - minus filterby )
 				find out all the external attributes ( columns ) that should be fetched
@@ -2106,17 +2182,20 @@ class PickMyBrain
 					# if this is negated value
 					$comparator_min = ">=";
 					$comparator_max = "<=";
+					$operator 		= "AND";
+					
 					if ( $column[0] === "!" )
 					{
 						$column = substr($column, 1);
 						$comparator_min = "<=";
 						$comparator_max = ">=";
+						$operator 		= "OR";
 					}
 					
 					$filter_by 	= array();
 					foreach ( $values as $filter_by_value ) 
 					{
-						$filter_by[] = "attr_$column $comparator_min " . $filter_by_value[0] . " AND attr_$column $comparator_max " . $filter_by_value[1];
+						$filter_by[] = "attr_$column $comparator_min " . $filter_by_value[0] . " $operator attr_$column $comparator_max " . $filter_by_value[1];
 						$wanted_attributes["attr_$column"] = 1;
 					}
 					
@@ -2140,7 +2219,7 @@ class PickMyBrain
 				$filtering_done = true;
 				
 				$temp_sql = "";
-				foreach ( $temp_matches as $doc_id => $score ) 
+				foreach ( $this->temp_matches as $doc_id => $score ) 
 				{
 					$temp_sql .= ",$doc_id";
 				}
@@ -2149,7 +2228,7 @@ class PickMyBrain
 				$sentisql = "SELECT ID, avgsentiscore FROM PMBDocinfo WHERE ID IN ($temp_sql) $filter_by_sql";
 				$sentipdo = $this->db_connection->query(str_replace($find, $repl, $sentisql));	
 
-				$max_doc_score = (int)(($tc - count($non_wanted_keywords)) * array_sum($this->field_weights) * 1000) + 999;
+				$max_doc_score = (int)(($tc - $non_wanted_count) * array_sum($this->field_weights) * 1000) + 999;
 				$sentimode = 1;
 				unset($temp_sql, $sentisql);
 				# sentiscale === 100 ( document score only ) 
@@ -2181,7 +2260,7 @@ class PickMyBrain
 					{
 						case 1:
 						# points/maxpoints * avgsentiscore + (((maxpoints - points)/maxpoints) * sentiscore )
-						$temp_sentiscores[$doc_id] = (int)($temp_matches[$doc_id]/$max_doc_score * $row[1] + ((($max_doc_score-$temp_matches[$doc_id])/$max_doc_score) * $temp_sentiscores[$doc_id]));
+						$temp_sentiscores[$doc_id] = (int)($this->temp_matches[$doc_id]/$max_doc_score * $row[1] + ((($max_doc_score-$this->temp_matches[$doc_id])/$max_doc_score) * $temp_sentiscores[$doc_id]));
 						break;
 						
 						case 2:
@@ -2216,7 +2295,7 @@ class PickMyBrain
 				
 				$group_attr = "attr_".$this->group_attr;
 				$group_sort_attr = "";
-				
+
 				# external, not internal group sort attr
 				# introduce the column in the mysql query
 				if ( strpos($this->group_sort_attr, "@") === false ) 
@@ -2226,10 +2305,10 @@ class PickMyBrain
 				
 				$group_sort_start = microtime(true);
 				
-				if ( !empty($temp_matches) )
+				if ( !empty($this->temp_matches) )
 				{
 					$temp_sql = "";
-					foreach ( $temp_matches as $doc_id => $score ) 
+					foreach ( $this->temp_matches as $doc_id => $score ) 
 					{
 						$temp_sql .= ",$doc_id";
 					}
@@ -2241,8 +2320,9 @@ class PickMyBrain
 				{
 					$temp_doc_id_sql[0] = " ";
 					$groupsql = "SELECT ID, $group_attr $group_sort_attr FROM PMBDocinfo WHERE ID IN ($temp_doc_id_sql) $filter_by_sql";
+					
 				}
-				
+
 				$filtering_done = true;
 				$grouppdo = $this->db_connection->query(str_replace($find, $repl, $groupsql));	
 				unset($groupsql, $temp_sql);
@@ -2259,8 +2339,8 @@ class PickMyBrain
 							if ( $this->group_sort_attr === "@score" ) 
 							{			
 								# use document score/weight/rank values		
-								$new_ref_value 	= $temp_matches[$doc_id];
-								$old_ref_value 	= $temp_matches[$temp_groups[$attr_val]];
+								$new_ref_value 	= $this->temp_matches[$doc_id];
+								$old_ref_value 	= $this->temp_matches[$temp_groups[$attr_val]];
 							}
 							else
 							{
@@ -2326,9 +2406,6 @@ class PickMyBrain
 							$temp_counter[$attr_val] 		= 1;
 						}
 					}
-					
-					# not needed anymore
-					unset($temp_group_attrs);
 				}
 				
 				# close instance cursor
@@ -2364,13 +2441,13 @@ class PickMyBrain
 				{
 					# now results have been grouped
 					# remove unnecessary indexes from temp_matches array				
-					if ( !empty($temp_matches) )
+					if ( !empty($this->temp_matches) )
 					{
-						foreach ( $temp_matches as $doc_id => $score ) 
+						foreach ( $this->temp_matches as $doc_id => $score ) 
 						{
 							if ( !isset($temp_groups[$doc_id]) )
 							{
-								unset($temp_matches[$doc_id]); # unset unnecessary doc_ids
+								unset($this->temp_matches[$doc_id]); # unset unnecessary doc_ids
 							}
 						}
 					}
@@ -2379,10 +2456,9 @@ class PickMyBrain
 						# temp_matches is not set => so we are sorting by an external attribute
 						# rewrite $temp_doc_id_sql, because it surely has been changed
 						$temp_doc_id_sql = "";
-						foreach ( $temp_groups as $attr => $doc_id ) 
+						foreach ( $temp_groups as $doc_id => $attr ) 
 						{
 							$temp_doc_id_sql .= ",$doc_id";
-							#$temp_sql .= ",$doc_id";
 						}
 						$temp_doc_id_sql[0] = " ";
 					}
@@ -2400,10 +2476,24 @@ class PickMyBrain
 			# special sort mode ( sort by grouped result count ) 
 			if ( $this->sort_attr === "@count" )
 			{
+				$grouper_values = array();
+				$grouper_sort_values = array();
+				
 				# rewrite $temp_groups with group match counts
-				foreach ( $temp_groups as $doc_id => $attr )
+				if ( $this->group_sort_attr === "@score" || $this->group_sort_attr === "@sentiscore" )
 				{
-					$temp_groups[$doc_id] = $temp_counter[$attr];
+					foreach ( $temp_groups as $doc_id => $attr )
+					{
+						$grouper_values[$doc_id] = $temp_counter[$attr];
+					}
+				}
+				else
+				{
+					foreach ( $temp_groups as $doc_id => $attr )
+					{
+						$grouper_values[$doc_id] = $temp_counter[$attr];
+						$grouper_sort_values[$doc_id] = $temp_group_attrs[$attr];
+					}
 				}
 				
 				# not needed anymore
@@ -2412,19 +2502,19 @@ class PickMyBrain
 				# then, sort according to sorting order
 				if ( $this->sortdirection === "desc" )
 				{
-					arsort($temp_groups);
+					arsort($grouper_values);
 				}
 				else
 				{
-					asort($temp_groups);
+					asort($grouper_values);
 				}
-				
-				#$temp_matches = $temp_groups;
+
+				#$this->temp_matches = $temp_groups;
 				unset($temp_group_attrs); # not needed anymore
 				# fetch docinfo for documents within the given LIMIT and OFFSET values
 				$i = 0;
 				$doc_ids = array();
-				foreach ( $temp_groups as $doc_id => $count ) 
+				foreach ( $grouper_values as $doc_id => $count ) 
 				{
 					if ( $i >= $offset )
 					{
@@ -2434,29 +2524,51 @@ class PickMyBrain
 						}
 						
 						$this->result["matches"][$doc_id]["@count"] = $count;
-						if ( isset($temp_matches[$doc_id]) ) 
+						$this->result["matches"][$doc_id][$this->group_attr] = $temp_groups[$doc_id];
+						if ( isset($grouper_sort_values[$doc_id]) ) $this->result["matches"][$doc_id][$this->group_sort_attr] = $grouper_sort_values[$doc_id];
+						
+						if ( isset($this->temp_matches[$doc_id]) ) 
 						{
-							$this->result["matches"][$doc_id]["@score"] = $temp_matches[$doc_id];
+							$this->result["matches"][$doc_id]["@score"] = $this->temp_matches[$doc_id];
 						}
 					}
 					
 					++$i;
 				}
 				
-			
+				unset($temp_groups, $grouper_values, $grouper_sort_values);
+
 			}
 			else if ( $disable_score_calculation )
 			{
+				$sql_columns = array();
+				
+				$db_sort_column = "attr_".$this->sort_attr;
+				$sql_columns["attr_".$this->sort_attr] = $this->sort_attr;
+				
+				if ( $this->groupmode > 1 ) 
+				{
+					$sql_columns["attr_".$this->group_attr] = $this->group_attr;
+				}
+				
 				# fetch external data 
-				$column_name = "attr_".$this->sort_attr;
+				$sql_columns_textual = implode(",", array_keys($sql_columns));
 				$filtering_done = true;
-				$sortsql = "SELECT ID, $column_name FROM PMBDocinfo WHERE ID IN ($temp_doc_id_sql) $filter_by_sql ORDER BY $column_name " . $this->sortdirection . " LIMIT $offset, $limit";
+				$temp_doc_id_sql[0] = " ";
+				$sortsql = "SELECT ID, $sql_columns_textual FROM PMBDocinfo WHERE ID IN ($temp_doc_id_sql) $filter_by_sql ORDER BY $db_sort_column " . $this->sortdirection . " LIMIT $offset, $limit";
+
 				$sortpdo = $this->db_connection->query(str_replace($find, $repl, $sortsql));	
-				unset($temp_matches, $temp_groups);
+				unset($this->temp_matches, $temp_groups);
 				
 				while ( $row = $sortpdo->fetch(PDO::FETCH_ASSOC) )
 				{
-					$data = array($column_name => (int)$row[$column_name]);
+					$data = array();
+					foreach ( $sql_columns as $db_column_name => $pmb_attribute_name ) 
+					{
+						$data[$pmb_attribute_name] = (int)$row[$db_column_name];
+					}
+					
+					#$data = array($this->sort_attr => (int)$row[$column_name]);
 					$this->result["matches"][(int)$row["ID"]] = $data;
 				}
 			}
@@ -2464,13 +2576,13 @@ class PickMyBrain
 			{
 				if ( !empty($temp_sentiscores) )
 				{
-					$temp_matches = $temp_sentiscores;
+					$this->temp_matches = $temp_sentiscores;
 				}
 				
 				if ( !isset($filtering_done) && !empty($filter_by_sql) )
 				{
 					$temp_sql = "";
-					foreach ( $temp_matches as $doc_id => $score ) 
+					foreach ( $this->temp_matches as $doc_id => $score ) 
 					{
 						$temp_sql .= ",$doc_id";
 					}
@@ -2487,7 +2599,7 @@ class PickMyBrain
 					# resultcount needs to be recalculated
 					while ( $row = $sortpdo->fetch(PDO::FETCH_ASSOC) )
 					{
-						$t_matches[(int)$row["ID"]] = $temp_matches[(int)$row["ID"]]; # copy the scores
+						$t_matches[(int)$row["ID"]] = $this->temp_matches[(int)$row["ID"]]; # copy the scores
 						++$t_count;
 					}
 				
@@ -2504,7 +2616,7 @@ class PickMyBrain
 						return $this->result;
 					}
 					
-					$temp_matches = $t_matches;
+					$this->temp_matches = $t_matches;
 					unset($t_matches);
 				}
 
@@ -2512,21 +2624,21 @@ class PickMyBrain
 				{
 					case PMB_SORTBY_RELEVANCE:
 					case PMB_SORTBY_POSITIVITY: 
-					arsort($temp_matches);
+					arsort($this->temp_matches);
 					break;
 						
 					case PMB_SORTBY_NEGATIVITY:
-					asort($temp_matches);	
+					asort($this->temp_matches);	
 					break;
 					
 					case PMB_SORTBY_ATTR:
 					if ( $this->sortdirection === "desc" )
 					{
-						arsort($temp_matches);
+						arsort($this->temp_matches);
 					}
 					else
 					{
-						asort($temp_matches);	
+						asort($this->temp_matches);	
 					}
 					break;
 				}
@@ -2534,7 +2646,7 @@ class PickMyBrain
 				# fetch docinfo for documents within the given LIMIT and OFFSET values
 				$i = 0;
 				$doc_ids = array();
-				foreach ( $temp_matches as $doc_id => $score ) 
+				foreach ( $this->temp_matches as $doc_id => $score ) 
 				{
 					if ( $i >= $offset )
 					{

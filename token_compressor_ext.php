@@ -252,17 +252,7 @@ try
 			$temp_string = "";
 			if ( $sentiment_analysis )
 			{
-				if ( $document_senti_score < -128 ) 
-				{
-					$document_senti_score = -128;
-				}
-				else if ( $document_senti_score > 127 )
-				{
-					$document_senti_score = 127;
-				}
-		
-				# combine the count of tokens and sentiment score into one number
-				$integer = $document_senti_score+128;
+				$integer = $document_senti_score;
 				
 				do
 				{

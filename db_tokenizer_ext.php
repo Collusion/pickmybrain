@@ -845,10 +845,20 @@ while ( true )
 			if ( isset($word_sentiment_scores[$token]) )
 			{
 				$wordsenti = $word_sentiment_scores[$token];
+				if ( $wordsenti < -128 ) 
+				{
+					$wordsenti = -128;
+				}
+				else if ( $wordsenti > 127 )
+				{
+					$wordsenti = 127;
+				}
+				
+				$wordsenti = $wordsenti+128; # negative values not allowed
 			}
 			else
 			{
-				$wordsenti = 0;
+				$wordsenti = 128; # equal to zero
 			}
 			
 			$insert_buffer .= sprintf("%12X %8X %X", ($crc32<<16)|$tid, $document_id, $wordsenti)."$string\n";
