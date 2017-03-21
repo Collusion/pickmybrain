@@ -64,22 +64,26 @@ body
 }
 .pagination .prev, .pagination .next {}
 
-
 #pmblivesearch
 {
-	width:450px;
+	width:550px;
 	position:fixed;
 	/*right:5px;*/
 	top:10px;
 	left:50%;
-	margin-left:-240px;
+	margin-left:-275px;
 	min-height:200px;
 	background:#fff;
 	padding:15px 15px;
 	-webkit-box-shadow: 0px 5px 12px 3px rgba(0,0,0,0.12);
 	-moz-box-shadow: 0px 5px 12px 3px rgba(0,0,0,0.12);
 	box-shadow: 0px 5px 12px 3px rgba(0,0,0,0.12);
-	
+}
+
+.errormessage
+{
+	display:inline-block;
+	margin-top:10px;
 }
 
 .realhidden
@@ -113,6 +117,16 @@ body
 	border:0;
 	background-color: #ddd;
 	height: 1px;
+	display:none;
+}
+
+.searchoptions
+{
+	width:96%;
+	padding:4px 8px;
+	margin:5px 2%;
+	display:none;
+	background:#f8f8f8;
 }
 
 #pmblivesearchform
@@ -124,23 +138,78 @@ body
 
 #pmblivesearchinput, #pmblivesearchinput:focus, #pmblivesearchinput:active
 {
+	float:left;
 	display:inline-block;
 	vertical-align:auto;
 	color:#000;
 	margin:0;
 	border:0;
-	width:96%;
+	width:382px;
 	line-height:22px;
-	padding:4px 2%;
+	padding:4px 10px;
 	font-size:0.925em;
 	background:#fff;
 	-webkit-box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.10);
 	-moz-box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.10);
 	box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.10);
+	margin-right:2px;
+	-moz-border-radius: 2px;
+	-webkit-border-radius: 2px;
+	-khtml-border-radius: 2px;
+	border-radius: 2px;
 }
+
+
+.sbutton
+{
+	height:30px;
+	padding:2px 0;
+	margin-left:2px;
+	background-color:#11abb0;
+	color:#fff;
+	font: 12px montserrat-bold, sans-serif;
+	display:inline-block;
+	float:left;
+	line-height:26px;
+	cursor:pointer;
+	width:43px;
+	text-align:center;
+	-webkit-touch-callout: none; /* iOS Safari */
+    -webkit-user-select: none; /* Safari */
+     -khtml-user-select: none; /* Konqueror HTML */
+       -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none; /* Non-prefixed version, currently
+                                  supported by Chrome and Opera */
+	-webkit-box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.10);
+	-moz-box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.10);
+	box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.10);
+	-moz-border-radius: 2px;
+	-webkit-border-radius: 2px;
+	-khtml-border-radius: 2px;
+	border-radius: 2px;
+}
+
+.sbutton:hover
+{
+	-webkit-box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.15);
+	-moz-box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.15);
+	box-shadow: 0px 3px 5px 2px rgba(0,0,0,0.15);
+	background-color:#13babf;
+	-webkit-transition: all .2s ease-in-out;
+	-moz-transition: all .2s ease-in-out;
+	-o-transition: all .2s ease-in-out;
+	-ms-transition: all .2s ease-in-out;
+	transition: all .2s ease-in-out;
+
+}
+
+
+
 
 .result_container
 {
+	margin-top:10px;
 	line-height:15px;
 	padding:10px 2%;
 	font-family:Georgia, "Times New Roman", Times, serif;

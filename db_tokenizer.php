@@ -32,12 +32,20 @@ if ( !isset($process_number) )
 register_shutdown_function("shutdown", $index_id, $process_number);
 
 define("CHARSET_REGEXP", "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "]/u");
+
+$forbidden_tokens[""] 	= 1;
+$forbidden_tokens[" "] 	= 1;
 							
 foreach ( $blend_chars as $blend_char ) 
 {
 	$blend_chars_space[] = " $blend_char ";
 	$blend_chars_space[] = " $blend_char";
 	$blend_chars_space[] = "$blend_char ";
+	
+	if ( stripos($charset, $blend_char) === false ) 
+	{
+		$forbidden_tokens[$blend_char] = 1;
+	}
 }
 							
 $blend_chars_space[] = "&#13";
@@ -686,14 +694,16 @@ while ( true )
 		# reset
 		$temp_documents = 0;		
 	}
-
+	
+	unset($blend_replacements);
+	
 	/*
 		CHARSET PROCESSING STARTS
 	*/	
 	foreach ( $fields as $f_id => $field ) 
 	{
 		# add spaces in the front and the back of each field for the single blend char removal to work
-		$fields[$f_id] = " " . $fields[$f_id] . " ";
+		$field = " " . $field . " ";
 		
 		# html preprocessor
 		if ( $html_strip_tags )
@@ -702,7 +712,7 @@ while ( true )
 			{
 				$dom = new DOMDocument();
 				libxml_use_internal_errors(TRUE);
-				$dom->loadHTML(mb_convert_encoding($fields[$f_id], 'html-entities', "UTF-8"));
+				$dom->loadHTML(mb_convert_encoding($field, 'html-entities', "UTF-8"));
 				$dom->preserveWhiteSpace = false;
 				$dom->formatOutput = false;
 				$changes = 0;
@@ -762,38 +772,38 @@ while ( true )
 				# if there are changes, stringify the docuoment
 				if ( $changes ) 
 				{
-					$fields[$f_id] = $dom->saveXML();
+					$field = $dom->saveXML();
 				}
 				
 				# remove cdata elements with preg_replace
 				if ( $cdata ) 
 				{
-					$fields[$f_id] = preg_replace('/<!\[cdata\[(.*?)\]\]>/is', "", $fields[$f_id]);
+					$field = preg_replace('/<!\[cdata\[(.*?)\]\]>/is', "", $field);
 				}
 			}
 			
 			# finally, strip tags 
-			$fields[$f_id] = strip_tags(str_replace(array("<",">"), array(" <","> "), $fields[$f_id]));
+			$field = strip_tags(str_replace(array("<",">"), array(" <","> "), $field));
 		}
 		
 		# decode html entities
-		$fields[$f_id] = html_entity_decode($fields[$f_id]);
+		$field = html_entity_decode($field);
 			
 		# convert to lowercase
-		$fields[$f_id] = mb_strtolower($fields[$f_id]);
+		$field = mb_strtolower($field);
 		
 		# unwanted characters
-		$fields[$f_id] = str_replace($unwanted_characters_plain_text, " ", $fields[$f_id]);
+		$field = str_replace($unwanted_characters_plain_text, " ", $field);
 		
 		# if sentiment analysis is enabled, do 
-		if ( $sentiment_analysis && !empty($fields[$f_id]) && !empty($sentiment_class_name) ) 
+		if ( $sentiment_analysis && !empty($field) && !empty($sentiment_class_name) ) 
 		{
-			$temp_sentiment_scores = $$sentiment_class_name->scoreContext($fields[$f_id]);
+			$temp_sentiment_scores = $$sentiment_class_name->scoreContext($field);
 			$document_avg_score   += $$sentiment_class_name->scoreContextAverage();
 			
 			foreach ( $temp_sentiment_scores as $token => $temp_average ) 
 			{
-				if ( empty($token) ) continue;
+				if ( $token === "" ) continue;
 						
 				if ( !isset($word_sentiment_scores[$token]) )
 				{
@@ -809,60 +819,71 @@ while ( true )
 		# remove ignore_chars
 		if ( !empty($ignore_chars) )
 		{
-			$fields[$f_id] = str_replace($ignore_chars, "", $fields[$f_id]);
+			$field = str_replace($ignore_chars, "", $field);
 		}
-
+		
 		# mass-replace all non-defined dialect characters if necessary
 		if ( $dialect_processing && !empty($mass_find) ) 
 		{
-			$fields[$f_id] = str_replace($mass_find, $mass_replace, $fields[$f_id]);
+			$field = str_replace($mass_find, $mass_replace, $field);
 		}
 		
 		# remove non-wanted characters and keep others
-		$fields[$f_id] = preg_replace(CHARSET_REGEXP, " ", $fields[$f_id]);
+		$field = preg_replace(CHARSET_REGEXP, " ", $field);
 				
 		# remove single blended chars
-		$fields[$f_id] = str_replace($blend_chars_space, " ", $fields[$f_id]);
+		$field = str_replace($blend_chars_space, " ", $field);
 		
 		# process words that contain blend chars ( in the middle )
 		foreach ( $blend_chars as $blend_char ) 
 		{
 			$q = preg_quote($blend_char);
 			$regexp = "/[".$q."\w]+(".$q.")[\w".$q."]+/u";
-			
-			$fields[$f_id] = preg_replace_callback($regexp, "blendedwords", $fields[$f_id]);
+			unset($matches);
+			preg_match_all($regexp, $field, $matches, PREG_SET_ORDER);
+		
+			if ( !empty($matches) ) 
+			{
+				foreach ( $matches as $data ) 
+				{
+					$blend_replacements[$data[0]] = blended_chars_new($data);
+				}
+			}
 		}
 	
 		# separate numbers and letters from each other
 		if ( $separate_alnum ) 
 		{
-			$fields[$f_id] = preg_replace('/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/u', ' ', $fields[$f_id]);
-		}	
+			$field = preg_replace('/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/u', ' ', $field);
+		}
+		
+		$fields[$f_id] = $field;
 	}
-
-	foreach ( $fields as $field_id => $field ) 
+	
+	foreach ( $fields as $f_id => $field ) 
 	{
 		$pos = 1;
 		$expl = explode(" ", $field);
 
-		# ota kiinni tapaukset jossa expl-array vaan yhden alkion pituinen
 		foreach ( $expl as $m_i => $match ) 
 		{
-			if ( isset($match) && $match !== '' )
+			if ( empty($forbidden_tokens[$match]) )
 			{
 				$temporary_token_ids[$match] = 1;
 				
-				#if ( isset(
 				$crc32 = crc32($match);
 				$b = md5($match);
 				$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
-				$field_pos = ($pos << $bitshift) | $field_id;
+				$field_pos = ($pos << $bitshift) | $f_id;
 				
 				# sentiment score
-				$wordsentiscore = 0;
 				if ( !empty($word_sentiment_scores[$match]) )
 				{
 					$wordsentiscore = $word_sentiment_scores[$match];
+				}
+				else
+				{
+					$wordsentiscore = 0;
 				}
 				
 				if ( $sentiment_analysis ) 
@@ -874,16 +895,49 @@ while ( true )
 					$insert_data_sql	.= ",($crc32, $tid, $document_id, $field_pos)";
 				}
 				
+				# if this token consists blend_chars and has a parallel version
+				if ( isset($blend_replacements[$match]) )
+				{
+					$t_pos = $pos;
+					foreach ( explode(" ", $blend_replacements[$match]) as $token_part ) 
+					{
+						$temporary_token_ids[$token_part] = 1;
+						$crc32 = crc32($token_part);
+						$b = md5($token_part);
+						$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+						$field_pos = ($t_pos << $bitshift) | $f_id;
+						
+						# sentiment score
+						if ( !empty($word_sentiment_scores[$match]) )
+						{
+							$wordsentiscore = $word_sentiment_scores[$match];
+						}
+						else
+						{
+							$wordsentiscore = 0;
+						}
+						
+						if ( $sentiment_analysis ) 
+						{
+							$insert_data_sql	.= ",($crc32, $tid, $document_id, $field_pos, $wordsentiscore)";
+						}
+						else
+						{
+							$insert_data_sql	.= ",($crc32, $tid, $document_id, $field_pos)";
+						}
+						++$t_pos;
+					}
+				}
+				
 				++$pos;
 			}
 		}
 	}
-	
-	unset($expl);
+
+	unset($expl, $fields);
 	
 	try
 	{
-		# $document_attrs["attr_$column_name"] = $column_value; 
 		$columns = array();
 		$updates = array();
 	

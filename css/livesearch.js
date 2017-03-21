@@ -1,3 +1,32 @@
+function searchOptions(buttonName) {
+	if ( buttonName == 'sort' || buttonName == 'group' || buttonName == 'mode' )
+	{
+		var elem = document.getElementById(buttonName);
+		var button = document.getElementsByName(buttonName)[0];
+		
+		
+		
+		if ( elem.offsetParent === null )
+		{
+			document.getElementById("sort").style.display = 'none';
+			document.getElementById("group").style.display = 'none';
+			document.getElementById("mode").style.display = 'none';
+			document.getElementsByName("sort")[0].style.backgroundColor = '#11abb0';
+			document.getElementsByName("group")[0].style.backgroundColor = '#11abb0';
+			document.getElementsByName("mode")[0].style.backgroundColor = '#11abb0';
+			
+			elem.style.display = 'inline-block';
+			button.style.backgroundColor = '#3d4145';
+		}
+		else
+		{
+			elem.style.display = 'none';
+			button.style.backgroundColor = '#11abb0';
+		}
+
+	}
+}
+
 // JavaScript Document
 function pmbsearch(str, e, offset) {
 	
@@ -35,6 +64,17 @@ function pmbsearch(str, e, offset) {
 		return;
 	}
 	
+	var form = document.getElementById("pmblivesearchform");
+
+	var sortby = form.elements["sort"].value;
+	var sort_attribute = form.elements["sort_attribute"].value;
+	var sort_direction = form.elements["sort_direction"].value; // matchmode
+	var groupmode = form.elements["groupmode"].value;
+	var group_attr = form.elements["group_attribute"].value;
+	var group_sort_attr = form.elements["group_sort_attribute"].value;
+	var group_sort_dir = form.elements["group_sort_direction"].value;
+	var matchmode = form.elements["matchmode"].value;
+
 	var index_name = document.getElementById("index_name").value;
 
 	var h = window.innerHeight
@@ -56,7 +96,7 @@ function pmbsearch(str, e, offset) {
 		}
 	}
 	
-	xmlhttp.open("GET","livesearch.php?q="+encodeURIComponent(str)+"&h="+h+"&o="+offset+"&index_name="+index_name,true);
+	xmlhttp.open("GET","livesearch.php?q="+encodeURIComponent(str)+"&h="+h+"&o="+offset+"&index_name="+index_name+"&sort="+sortby+"&sort_attr="+sort_attribute+"&sort_dir="+sort_direction+"&group="+groupmode+"&group_attr="+group_attr+"&group_sort_attr="+group_sort_attr+"&group_sort_dir="+group_sort_dir+"&match="+matchmode,true);
 	xmlhttp.send();
 
 	}, 250);

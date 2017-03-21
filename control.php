@@ -942,6 +942,7 @@ Hi there! Start configuration of your Pickmybrain search engine by selecting an 
       </div>
 
    </footer> <!-- Footer End-->
+  
 </body>
 </html>
 
@@ -2296,7 +2297,114 @@ catch ( PDOException $e )
 
    </footer> <!-- Footer End-->
    <!-- initialize livesearch -->
-   <?php if ( !empty($index_name) ) echo "<script src='css/init.js'></script>"; ?>
+   <?php 
+  	 echo "<script src='css/init.js'></script>";
+   
+   	   $sort_select_values = "<option value='@count'>@count</option>\n";
+	   $group_attribute_values = "";
+	   $group_sort_values = "<option value='@score'>@score</option>\n";
+	   
+	   if ( $sentiment_analysis ) 
+	   {
+		   $group_sort_values .= "<option value='@sentiscore'>@sentiscore</option>\n";
+	   }
+   	   
+	   if ( $index_type == 2 ) 
+	   {
+		   foreach ( $main_sql_attrs as $attribute ) 
+		   {
+			   $sort_select_values .= "<option value='$attribute'>$attribute</option>\n";
+			   $group_attribute_values .= "<option value='$attribute'>$attribute</option>\n";
+			   $group_sort_values .= "<option value='$attribute'>$attribute</option>\n";
+		   }
+	   }
+	   else
+	   {
+		   $sort_select_values .= "<option value='domain'>domain</option>\n
+		   						   <option value='timestamp'>timestamp</option>
+								   <option value='category'>category</option>\n";
+								   
+		   $group_attribute_values .= "<option value='domain'>domain</option>\n
+		   						   <option value='timestamp'>timestamp</option>
+								   <option value='category'>category</option>\n";
+								   
+								   
+		   $group_sort_values .= "<option value='domain'>domain</option>\n
+		   						   <option value='timestamp'>timestamp</option>
+								   <option value='category'>category</option>\n";
+	   }
+	   
+	   $not_available = "";
+	   $extra_info = "";
+	   $disabled = "";
+	   if ( !$sentiment_available )
+	   {
+		   $not_available = "color:#bbb;";
+		   $extra_info = "<a href='http://www.pickmybra.in' target='_blank'>buy now</a>";
+		   $disabled = "disabled";
+	   }
+	   else if ( !$sentiment_analysis )
+	   {
+		    $not_available = "color:#bbb;";
+			$extra_info = "unavailable";
+			$disabled = "disabled";
+	   }
+   
+    ?>
+   
+ 
+   
+   <div id='pmblivesearch' class='hidden'>
+       
+        <form id='pmblivesearchform'>
+    		<input type='hidden' name='index_name' id='index_name' value='<?php echo $index_name; ?>'>
+            <input type='text' placeholder='What are we looking for?' id='pmblivesearchinput' onkeyup='pmbsearch(this.value, event)' />
+            <div class='sbutton' name='sort' onclick='searchOptions(this.innerHTML)'>sort</div>
+            <div class='sbutton' name='group' onclick='searchOptions(this.innerHTML)'>group</div>
+            <div class='sbutton' name='mode' onclick='searchOptions(this.innerHTML)'>mode</div>
+            <div class='searchoptions' id='sort'>
+            	<input type='radio' name='sort' value='1' checked onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> PMB_SORTBY_RELEVANCE <br>
+                <input <?php echo $disabled; ?> type='radio' name='sort' value='2' onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> <span style=' <?php echo $not_available; ?>'>PMB_SORTBY_POSITIVITY </span> <?php echo $extra_info; ?><br>
+                <input <?php echo $disabled; ?> type='radio' name='sort' value='3' onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> <span style=' <?php echo $not_available; ?>'>PMB_SORTBY_NEGATIVITY </span> <?php echo $extra_info; ?><br>
+                <input type='radio' name='sort' value='4' onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> PMB_SORTBY_ATTR <br>
+                <select name='sort_attribute' onchange='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'>
+                	<option value=''>Attribute</option>
+                    <?php echo $sort_select_values; ?>
+                </select>
+                <select name='sort_direction' onchange='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'>
+                	<option value='desc'>DESCENDING</option>
+                    <option value='asc'>ASCENDING</option>
+                </select>
+            </div>
+            <div class='searchoptions' id='group'>
+            	<input type='radio' name='groupmode' value='1' checked onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> PMB_GROUPBY_DISABLED <br>
+                <input type='radio' name='groupmode' value='2' onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> PMB_GROUPBY_ATTR <br>
+                 <select name='group_attribute' onchange='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'>
+                	<option value=''>Grouping attribute</option>
+                    <?php echo $group_attribute_values; ?>
+                </select>
+                <select name='group_sort_attribute' onchange='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'>
+                	<option value=''>Groupsort attribute</option>
+                    <?php echo $group_sort_values; ?>
+                </select>
+                <select name='group_sort_direction' onchange='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'>
+                	<option value='desc'>DESC</option>
+                    <option value='asc'>ASC</option>
+                </select>
+            </div>
+            <div class='searchoptions' id='mode'>
+                <input type='radio' name='matchmode' value='1' onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> PMB_MATCH_ANY <br>
+                <input type='radio' name='matchmode' value='2' checked onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> PMB_MATCH_ALL <br>
+                <input type='radio' name='matchmode' value='3' onclick='pmbsearch(document.getElementById("pmblivesearchinput").value, event)'> PMB_MATCH_STRICT <br>
+            </div>
+        </form>
+        <span id='pmbresultarea' data-checksum=''></span>
+    </div>
+		
+   
+   
+   
+   
 </body>
 
 </html>

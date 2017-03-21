@@ -41,9 +41,40 @@ if ( !empty($_GET["q"]) )
 	}
 
 	include("PMBApi.php");
-	
+
 	# the index name can be defined with the constructor or later on with SetIndex-method
 	$pickmybrain = new PickMyBrain($index_name); 
+	
+	# sortmode
+	if ( isset($_GET["sort"]) )
+	{
+		if ( !empty($_GET["sort_attr"]) )
+		{
+			$pickmybrain->SetSortMode((int)$_GET["sort"], $_GET["sort_attr"] . " " . $_GET["sort_dir"]);
+		}
+		else
+		{
+			$pickmybrain->SetSortMode((int)$_GET["sort"]);
+		}
+	}
+	
+	# groupmode
+	if ( isset($_GET["group"]) )
+	{
+		if ( !empty($_GET["group_attr"]) )
+		{
+			$pickmybrain->SetGroupBy((int)$_GET["group"], $_GET["group_attr"], $_GET["group_sort_attr"] . " " . $_GET["group_sort_dir"]);
+		}
+		else
+		{
+			$pickmybrain->SetGroupBy((int)$_GET["sort"]);
+		}
+	}
+	
+	if ( isset($_GET["match"]) )
+	{
+		$pickmybrain->SetMatchMode((int)$_GET["match"]);
+	}
 	
 	$result = $pickmybrain->Search($_GET["q"], $offset, $slots);
 
@@ -55,7 +86,7 @@ if ( !empty($_GET["q"]) )
 			$pagenumber = "Page " . (round($offset/$slots)+1) . " of ";
 		}
 		
-		echo "<div class='result_container'>$pagenumber" . $result["total_matches"]." results ( ".round(ceil($result["query_time"]*100)/100, 2)." seconds )</div>";
+		echo "<div class='result_container'>$pagenumber" . $result["total_matches"]." results ( ".round(ceil($result["query_time"]*1000)/1000, 3)." seconds )</div>";
 
 		# this index contains time statistics 
 		#print_r($result["stats"]); 
@@ -81,8 +112,8 @@ if ( !empty($_GET["q"]) )
 				{
 					$row["title"] = mb_substr($row["title"], 0, 90) . " ...";
 				}
-				
-				$compactlink = $pickmybrain->CompactLink($row["URL"], 60);
+
+				$compactlink = $pickmybrain->CompactLink($row["URL"], 90);
 				
 				echo "<div class='result_container'>
 						<a class='result_title' href='".$row["URL"]."'>".$row["title"]."</a>
@@ -131,11 +162,11 @@ if ( !empty($_GET["q"]) )
 	}
 	else if ( !empty($result["error"]) )
 	{
-		echo "<p>Following error message was received: ".$result["error"]."</p>";
+		echo "<div class='errormessage'>Following error message was received: ".$result["error"]."</div>";
 	}
 	else
 	{
-		echo "<p>Sorry, no results :(</p>";
+		echo "<div class='errormessage'>Sorry, no results :(</div>";
 	}	
 }
 

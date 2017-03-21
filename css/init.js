@@ -12,14 +12,6 @@
 				var index_name = elem.dataset.indexName;
 			}
 		}
-	
-		// create the search box and set id
-		var elem = document.createElement('div');
-		elem.setAttribute('id', 'pmblivesearch');
-		elem.setAttribute('class', 'hidden');
-		// then create content
-		elem.innerHTML = "<form id='pmblivesearchform'><input type='hidden' name='index_name' id='index_name' value='"+index_name+"'><input type='text' id='pmblivesearchinput' onkeyup='pmbsearch(this.value, event)' /></form><hr class='pmbline'/><span id='pmbresultarea' data-checksum=''></span>";
-		document.body.appendChild(elem);
 	}
 	
 	// searchbox opens when user presses control-key and q simultaneously

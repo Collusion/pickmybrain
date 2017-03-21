@@ -2112,6 +2112,27 @@ function SetProcessState($index_id, $process_number, $process_state)
 	}
 }
 
+function blended_chars_new($data) 
+{
+	#$data[0]; # matches word
+	#$data[1]; # blend char 
+	$data[0] = trim($data[0], " \t\n\r\0\x0B" . $data[1]);
+	$ret = str_replace($data[1], " ", $data[0]);	#  s.t.a.l.k.e.r. => s t a l k e r
+	
+	if ( $ret !== $data[0] ) 
+	{	
+		$combined = str_replace(" ", "", $ret); 		# s t a l k e r => stalker , b w => bw
+		$comb_len = mb_strlen($combined);			# 7 2	
+
+		if ( substr_count($ret, " ")+1 === $comb_len && $comb_len > 2 ) 
+		{
+			$ret = $combined;
+		}
+	}
+
+	return $ret;			
+}
+
 function blendedwords($data) 
 {
 	#print_r($data);
@@ -2126,7 +2147,7 @@ function blendedwords($data)
 	
 	if ( $t === $data[0] ) 
 	{
-		return false;
+		return $t;
 	}
 	
 	$combined = str_replace(" ", "", $t); 		# s t a l k e r => stalker , b w => bw
