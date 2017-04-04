@@ -89,6 +89,7 @@ class PickMyBrain
 	private $allowed_grouping_modes;
 	private $non_scored_sortmodes;
 	private $hex_lookup_decode;
+	private $hex_lookup_encode;
 	private $documents_in_collection;
 	private $delta_documents;
 	private $index_state;
@@ -96,6 +97,7 @@ class PickMyBrain
 	private $query_start_time;
 	private $temp_matches;
 	private $temp_sentiscores;
+	private $disabled_documents;
 		
 	public function __construct($index_name = "")
 	{
@@ -108,6 +110,7 @@ class PickMyBrain
 		{
 			$bin_val = pack("H*", sprintf("%02x", $i));
 			$this->hex_lookup_decode[$bin_val] = $i;
+			$this->hex_lookup_encode[$i] = $bin_val;
 		}	
 			
 		# lookup tables for sorting/grouping modes
@@ -174,6 +177,7 @@ class PickMyBrain
 		$this->temp_grouper_size	= 10000;
 		$this->charset_regexp		= "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "*\"]/u";
 		$this->blend_chars			= $blend_chars;
+		$this->ignore_chars			= $ignore_chars;
 		$this->result				= array();
 		$this->current_index		= $index_id;
 		$this->field_id_width		= $this->requiredBits($number_of_fields);
@@ -360,6 +364,172 @@ class PickMyBrain
 		return $content;
 	}
 	
+	public function ResetDisabledDocuments($indexname)
+	{
+		if ( empty($indexname) )
+		{
+			echo "Index not defined";
+			return false;
+		}
+		
+		try
+		{
+			# 1. how many documents total + statistics
+			$countpdo = $this->db_connection->prepare("SELECT ID FROM PMBIndexes WHERE name = ?");
+			$countpdo->execute(array(mb_strtolower(trim($indexname))));
+			
+			if ( $row = $countpdo->fetch(PDO::FETCH_ASSOC) )
+			{
+				$updpdo = $this->db_connection->prepare("UPDATE PMBIndexes SET disabled_documents = NULL WHERE ID = ?");
+				$updpdo->execute(array($row["ID"]));
+			}
+			else
+			{
+				# error, unknown index
+				echo "Unknown index: $indexname";
+				return false;	
+			}
+		}
+		catch ( PDOException $e )
+		{
+			echo "An error occurred when resetting disabled documents: " . $e->getMessage();
+			return false;	
+		}
+		
+		return true;
+	}
+	
+	public function DisableDocuments($indexname, $document_ids)
+	{
+		if ( empty($indexname) )
+		{
+			echo "Index not defined";
+			return false;
+		}
+		
+		if ( empty($document_ids) )
+		{
+			echo "No document ids provided";
+			return false;
+		}
+		
+		if ( !is_array($document_ids) )
+		{
+			echo "Document ids must be provided as an array";
+			return false;
+		}
+		
+		# ensure that all values and indexes are integers
+		foreach ( $document_ids as $d_i => $doc_id ) 
+		{
+			if ( (int)$d_i !== $d_i )
+			{
+				echo "All provided document ids must be integer values";	
+				return false;
+			}
+			if ( (int)$doc_id !== $doc_id )
+			{
+				echo "All provided document ids must be integer values";	
+				return false;
+			}
+		}
+		
+		$document_ids = array_flip($document_ids);
+		
+		try
+		{
+			# 1. how many documents total + statistics
+			$countpdo = $this->db_connection->prepare("SELECT ID, disabled_documents FROM PMBIndexes WHERE name = ?");
+			$countpdo->execute(array(mb_strtolower(trim($indexname))));
+				
+			if ( $row = $countpdo->fetch(PDO::FETCH_ASSOC) )
+			{
+				$index_id = (int)$row["ID"];
+				
+				# combine allready set disabled documents with the new provided ones
+				if ( !empty($row["disabled_documents"]) )
+				{
+					$delta = 1;
+					$len = strlen($row["disabled_documents"]);
+					$binary_data = &$row["disabled_documents"];
+					$temp = 0;
+					$shift = 0;
+				
+					for ( $i = 0 ; $i < $len ; ++$i )
+					{
+						$bits = $this->hex_lookup_decode[$binary_data[$i]];
+						$temp |= (($bits & 127) << $shift*7);
+						++$shift;
+						
+						if ( $bits > 127 )
+						{
+							# 8th bit is set, number ends here ! 
+							$delta = $temp+$delta-1;
+							$document_ids[$delta] = 1;
+							
+							# reset temp variables
+							$temp = 0;
+							$shift = 0;
+						}
+					}
+				}
+				
+				# sort document ids
+				ksort($document_ids);
+				
+				$encoded_string = "";
+				$delta = 1;
+				# vbdeltaencode data
+				foreach ( $document_ids as $document_id => $value ) 
+				{
+					$tmp = $document_id-$delta+1;
+					do
+					{
+						$lowest7bits = $tmp&127;
+						$tmp >>= 7;
+						
+						if ( $tmp )
+						{
+							$encoded_string .= $this->hex_lookup_encode[$lowest7bits];
+						}
+						else
+						{
+							$encoded_string .= $this->hex_lookup_encode[128 | $lowest7bits];
+						}	
+					}
+					while ( $tmp );
+					
+					$delta = $document_id;
+				}
+				
+				try
+				{
+				
+					# after the values have been updated, update the database table
+					$updpdo = $this->db_connection->prepare("UPDATE PMBIndexes SET disabled_documents = ? WHERE ID = ?");
+					$updpdo->execute(array($encoded_string, $index_id));
+				}
+				catch ( PDOException $e ) 
+				{
+					echo "An error occurred when updating disabled documents: " . $e->getMessage();
+					return false;	
+				}
+			}
+			else
+			{
+				# error, unknown index
+				echo "Unknown index: $indexname";
+				return false;	
+			}
+		}
+		catch ( PDOException $e ) 
+		{
+			echo "An error occurred when resolving index name: " . $e->getMessage();
+			return false;	
+		}
+		
+		return true;
+	}
 	
 	private function GroupTemporaryResults()
 	{
@@ -496,7 +666,7 @@ class PickMyBrain
 		try
 		{
 			# 1. how many documents total + statistics
-			$countpdo = $this->db_connection->prepare("SELECT ID, type, documents, delta_documents, current_state, updated FROM PMBIndexes WHERE name = ?");
+			$countpdo = $this->db_connection->prepare("SELECT ID, type, documents, delta_documents, current_state, updated, disabled_documents FROM PMBIndexes WHERE name = ?");
 			$countpdo->execute(array(mb_strtolower(trim($indexname))));
 				
 			if ( $row = $countpdo->fetch(PDO::FETCH_ASSOC) )
@@ -511,6 +681,7 @@ class PickMyBrain
 					$this->index_state 				= (int)$row["current_state"];
 					$this->latest_indexing_done 	= (int)$row["updated"];
 					$this->delta_documents		 	= 0;
+					$this->disabled_documents		= $row["disabled_documents"];
 					
 					if ( !empty($row["delta_documents"]) )
 					{
@@ -552,7 +723,7 @@ class PickMyBrain
 		$this->result["total_matches"] 	= 0;
 		$this->result["error"]			= "";
 		
-		if ( empty($query) )
+		if ( trim($query) === "" )
 		{
 			$this->result["error"] = "Query not defined";
 			return $this->result;
@@ -727,7 +898,7 @@ class PickMyBrain
 		{
 			$query = str_replace($this->ignore_chars, "", $query);
 		}
-		
+
 		# filter query with the charset regexp ( drops non-defined characters )
 		$query = preg_replace($this->charset_regexp, " ", $query);
 		
@@ -739,8 +910,12 @@ class PickMyBrain
 			foreach ( $this->blend_chars as $blend_char ) 
 			{
 				$blend_chars_to_trim[] = " $blend_char ";
-				$blend_chars_to_trim[] = " $blend_char";
 				$blend_chars_to_trim[] = "$blend_char ";
+				
+				if ( $blend_char !== "-" )
+				{
+					$blend_chars_to_trim[] = " $blend_char";
+				}
 			}
 			
 			$query = str_replace($blend_chars_to_trim, " ", $query);
@@ -801,7 +976,7 @@ class PickMyBrain
 		$query = trim(str_replace("\"", " ", $query));
 		
 		# if trimmed query is empty
-		if ( empty($query) )
+		if ( $query === "" )
 		{
 			return $this->result;
 		}
@@ -813,7 +988,7 @@ class PickMyBrain
 		$token_escape = array();
 		$token_order = array();
 		$dialect_tokens = array();
-
+		
 		$non_wanted_count = 0;
 		$tc = 0;
 		$tsc = 0;
@@ -999,7 +1174,6 @@ class PickMyBrain
 				# create pairs to prevent duplicates
 				if ( !empty($prev_token) )
 				{
-					#$real_token_pairs[$prev_token . " " . $special_token] = 1;
 					$real_token_pairs[$prev_token][$special_token] = 1;
 				}
 				$prev_token = $special_token;
@@ -1026,6 +1200,13 @@ class PickMyBrain
 			# fetch prefix hits
 			if ( !empty($token_escape_stem) )
 			{
+				# later on token groups are stored as chars ( 8bit integers )
+				# thats why maximum number of tokens ( originals and expanded ones ) combined is 256
+				if ( $this->expansion_limit + $tc > 255 )
+				{
+					$this->expansion_limit = 255 - $tc;
+				}
+				
 				$prefix_time_start = microtime(true);
 				$prefix_grouper = array();
 				$prefix_data = array();
@@ -1103,6 +1284,11 @@ class PickMyBrain
 				$i = 0;
 				foreach ( $prefix_data as $checksum => $cutlen ) 
 				{
+					if ( $i >= $this->expansion_limit )
+					{
+						break;
+					}
+					
 					# checksum === checksum of the token that this prefix points to
 					$token_sql[] = "(checksum = :sumadd$i AND token LIKE CONCAT('%', :tokadd$i, '%'))";
 					
@@ -1115,11 +1301,6 @@ class PickMyBrain
 					}
 
 					++$i;
-					
-					if ( $i >= $this->expansion_limit )
-					{
-						break;
-					}
 				}
 	
 				$this->result["stats"]["prefix_time"] = microtime(true) - $prefix_time_start;
@@ -1299,12 +1480,10 @@ class PickMyBrain
 				}
 				
 				# score lookup table for fuzzy matches
-				$score_lookup[$row["ID"]] 	= (float)$token_score;
 				$score_lookup_alt[] 		= (float)$token_score;
 
 				$encoded_data[] 	= $row["doc_ids"];
 				$lengths[] 			= strlen($row["doc_ids"]);
-				$encoded_group[] 	= $g++;
 				$encode_pointers[] 	= 0;
 				$encode_delta[] 	= 1;
 				
@@ -1315,7 +1494,6 @@ class PickMyBrain
 				$doc_lengths[] 		= strlen($row["token_positions"]);
 				$undone_values[]	= 0;
 				
-				$counts[] 			= +$row["doc_matches"];
 				$token_list[]		= $row["token"];
 				
 				++$tic;
@@ -1420,6 +1598,7 @@ class PickMyBrain
 					if ( $t_token[0] === "-" )
 					{
 						$t_token_trimmed = mb_substr($t_token, 1);
+						
 						if ( !isset($token_group_lookup[$t_token_trimmed]) )
 						{
 							$token_group_lookup[$t_token_trimmed] = $gn;
@@ -1440,6 +1619,30 @@ class PickMyBrain
 			
 			# number of all inputted keywords ( even non-wanted ones )
 			$token_count = count($token_order_rev);
+			
+			# if there are disabled documents, create a virtual non-wanted keyword
+			if ( !empty($this->disabled_documents) )
+			{
+				# last group is now marked as non wanted
+				$token_group_lookup[" "] 		= $token_count;
+				$non_wanted_group[$token_count] = 1;
+				++$token_count;
+				++$non_wanted_count;	# for correct bm25 scores
+				
+				$encoded_data[] 	= $this->disabled_documents;
+				$lengths[] 			= strlen($this->disabled_documents);
+				$encode_pointers[] 	= 0;
+				$encode_delta[] 	= 1;
+				
+				# document match positions
+				$doc_match_data[] 	= "";
+				$doc_pos_pointers[] = 0;
+				$avgs[] 			= 0;
+				$doc_lengths[] 		= 0;
+				$undone_values[]	= 0;
+				
+				$token_list[]		= " ";
+			}
 			
 			$required_bits = 0;
 			for ( $x = 0 ; $x < $token_count ; ++$x ) 
@@ -1529,7 +1732,7 @@ class PickMyBrain
 				# does not work if non_wanted_keywords not empty
 				$reference_bits = $required_bits;
 				
-				if ( !empty($non_wanted_keywords) )
+				if ( !empty($non_wanted_keywords) || !empty($non_wanted_group) )
 				{
 					$reference_bits = 4294967295; # 32bits 
 				}
@@ -1608,7 +1811,7 @@ class PickMyBrain
 			}
 			
 			asort($sorted_groups);
-			
+
 			$start = microtime(true);
 			$loop = 0;
 			while ( true ) 
@@ -1621,6 +1824,7 @@ class PickMyBrain
 				foreach ( $sorted_groups as $group => $token_group ) 
 				{
 					$group_bits = 1 << $token_group;
+					$encoded_group = $this->hex_lookup_encode[$group];
 					
 					if ( $encode_delta[$group] >= $max_doc_id )  
 					{
@@ -1806,14 +2010,15 @@ class PickMyBrain
 						{
 							if ( !empty($loop_doc_positions[$doc_id]) ) 
 							{
-								$loop_doc_positions[$doc_id] 	.= $bin_sep.$data[$l++];
-								$loop_doc_groups[$doc_id] 		.= " $group";
+								$loop_doc_positions[$doc_id] 	.= $bin_sep.$data[$l];
+								$loop_doc_groups[$doc_id]		.= $encoded_group;
 							}
 							else
 							{
-								$loop_doc_positions[$doc_id] 	= $data[$l++];
-								$loop_doc_groups[$doc_id] 		= "$group";
+								$loop_doc_positions[$doc_id] 	= $data[$l];
+								$loop_doc_groups[$doc_id]		= $encoded_group;
 							}
+							++$l;
 						}
 					
 						unset($temp_doc_ids, $data);
@@ -1878,8 +2083,8 @@ class PickMyBrain
 								continue;
 							}
 
-							$match_positions 	= explode($bin_sep, $loop_doc_positions[$doc_id]);
-							$match_groups 		= explode(" ", $loop_doc_groups[$doc_id]);	
+							$match_position_string = &$loop_doc_positions[$doc_id];
+							$match_position_groups = &$loop_doc_groups[$doc_id];
 							# now calculate document scores
 							if ( $exact_mode ) 
 							{
@@ -1888,6 +2093,7 @@ class PickMyBrain
 							
 							unset($best_match_score, $phrase_data, $document_count, $sentiment_data);
 							
+							$data_len		 	= strlen($loop_doc_positions[$doc_id]);
 							$phrase_score 		= 0;
 							$bm25_score 		= 0;
 							$self_score 		= 0;
@@ -1895,99 +2101,121 @@ class PickMyBrain
 							$sentiscore			= 0;
 							$position_storage 	= $last_pos_lookup;	
 							$exact_match 		= false;
+							$group_count		= 0;
+						
+							$t_group 	= $this->hex_lookup_decode[$match_position_groups[0]];
+							$qind		= $sorted_groups[$t_group];
+							$prev_group = $qind-1;	
 
-							foreach ( $match_positions as $m_i => $match_position ) 
-							{							
-								$t_group 	= +$match_groups[$m_i];
-								$qind		= $sorted_groups[$t_group];
-								$prev_group = $qind-1;	
+							# initialize temporary array variables for each token group
+							$phrase_data[$qind] 		= 0; # for phrase score bits
+							$document_count[$qind] 		= 0; # how many documents for this token group
+							$best_match_score[$qind] 	= $score_lookup_alt[$t_group]; # maxscore ( token quality )
+
+							$temp = 0;
+							$shift = 0;
+							$delta = 1;
+							$x = 0;
 								
-								if ( !isset($best_match_score[$qind]) )
-								{
-									# initialize temporary array variables for each token group
-									$phrase_data[$qind] 		= 0; # for phrase score bits
-									$document_count[$qind] 		= 0; # how many documents for this token group
-									$best_match_score[$qind] 	= 0; # maxscore ( token quality )
-								}
-	
-								# better quality score for this result group
-								if ( $score_lookup_alt[$t_group] > $best_match_score[$qind] )
-								{
-									$best_match_score[$qind] 	= $score_lookup_alt[$t_group];
-								}
+							for ( $i = 0 ; $i < $data_len ; ++$i )
+							{
+								$bits = $this->hex_lookup_decode[$match_position_string[$i]];
 								
-								$len = strlen($match_position);
-								$temp = 0;
-								$shift = 0;
-								$delta = 1;
-								$x = 0;
-								
-								for ( $i = 0 ; $i < $len ; ++$i )
+								if ( $bits === 128 )
 								{
-									if ( ($bits = $this->hex_lookup_decode[$match_position[$i]]) < 128 ) 
+									# increase document match count for the previous token group ( if sentiment analysis is on, decrement the count by one ) 
+									$document_count[$qind] += $x - $this->sentiment_index;
+									
+									# zero, as in binary separator
+									# token changes
+									# reset temporary variables
+									++$group_count;
+									$t_group 	= $this->hex_lookup_decode[$match_position_groups[$group_count]];
+									$qind		= $sorted_groups[$t_group];
+									$prev_group = $qind-1;
+									
+									if ( !isset($best_match_score[$qind]) )
 									{
-										# number is yet to end
-										# check also gere if shift is === 0 ( then temp = bits; )
-										$temp |= $bits << $shift*7;
-										++$shift;
+										# initialize temporary array variables for each token group
+										$phrase_data[$qind] 		= 0; # for phrase score bits
+										$document_count[$qind] 		= 0; # how many documents for this token group
+										$best_match_score[$qind] 	= 0; # maxscore ( token quality )
+									}
+		
+									# better quality score for this result group
+									if ( $score_lookup_alt[$t_group] > $best_match_score[$qind] )
+									{
+										$best_match_score[$qind] 	= $score_lookup_alt[$t_group];
+									}
+											
+									$temp = 0;
+									$shift = 0;
+									$delta = 1;
+									$x = 0;
+									
+								}
+								else if ( $bits < 128 ) 
+								{
+									# number is yet to end
+									# check also gere if shift is === 0 ( then temp = bits; )
+									$temp |= $bits << $shift*7;
+									++$shift;
+								}
+								else
+								{
+									# 8th bit is set, number ends here ! 
+									
+									if ( $x < $this->sentiment_index )
+									{
+										$sentiscore += ($temp|($bits-128 << $shift*7))-128;
+										$temp = 0;
+										$shift = 0;
 									}
 									else
 									{
-										# 8th bit is set, number ends here ! 
-										
-										if ( $x < $this->sentiment_index )
+										# otherwise this value is keyword position in document
+										if ( $shift ) 
 										{
-											$sentiscore += ($temp|($bits-128 << $shift*7))-128;
-											$temp = 0;
+											$delta = ($temp|($bits-128 << $shift*7))+$delta-1;
 											$shift = 0;
+											$temp = 0;
 										}
 										else
 										{
-											# otherwise this value is keyword position in document
-											if ( $shift ) 
-											{
-												$delta = ($temp|($bits-128 << $shift*7))+$delta-1;
-												$shift = 0;
-												$temp = 0;
-											}
-											else
-											{
-												$delta = $bits-129+$delta;
-											}
+											$delta = $bits-129+$delta;
+										}
 
-											$field_id_bit = 1 << ($delta & $this->lsbits);
-											$field_pos = $delta >> $this->field_id_width;
+										$field_id_bit = 1 << ($delta & $this->lsbits);
+										$field_pos = $delta >> $this->field_id_width;
 
-											# self score match
-											$self_score |= $field_id_bit;
+										# self score match
+										$self_score |= $field_id_bit;
 
-											# if there is a match in the same field 
-											if ( $position_storage[$field_id_bit][$prev_group] === $field_pos-1 )
-											{
-												$phrase_data[$qind] |= $field_id_bit;
-												
-												if ( $exact_mode ) 
-												{
-													unset($exact_ids_lookup_copy[(1<<$qind)|(1<<$prev_group)]);	
-												}
-											}
-											# if field_pos is 1 and token group is 0 -> exact match
-											else if ( $field_pos+$qind === 1 ) 
-											{
-												$exact_match = true;
-											}
+										# if there is a match in the same field 
+										if ( $position_storage[$field_id_bit][$prev_group] === $field_pos-1 )
+										{
+											$phrase_data[$qind] |= $field_id_bit;
 											
-											$position_storage[$field_id_bit][$qind] = $field_pos;	
+											if ( $exact_mode ) 
+											{
+												unset($exact_ids_lookup_copy[(1<<$qind)|(1<<$prev_group)]);	
+											}
+										}
+										# if field_pos is 1 and token group is 0 -> exact match
+										else if ( $field_pos+$qind === 1 ) 
+										{
+											$exact_match = true;
 										}
 										
-										++$x;
+										$position_storage[$field_id_bit][$qind] = $field_pos;	
 									}
+									
+									++$x;
 								}
-								
-								# increase document count ( if sentiment analysis is on, decrement the count by one ) 
-								$document_count[$qind] += $x - $this->sentiment_index;
 							}
-
+							
+							$document_count[$qind] += $x - $this->sentiment_index;
+							
 							if ( $exact_mode && !empty($exact_ids_lookup_copy)  )
 							{
 								# exact mode is on but document does not 
@@ -2804,7 +3032,7 @@ class PickMyBrain
 				while ( $row = $docpdo->fetch(PDO::FETCH_ASSOC) )
 				{
 					$row["content"] = $this->SearchFocuser($row["content"], $query, "fi", 40);
-					
+
 					# merge with existing rows
 					foreach ( $row as $column => $column_value ) 
 					{

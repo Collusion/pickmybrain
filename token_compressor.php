@@ -135,9 +135,9 @@ try
 	$w = 0;
 	$insert_sql = "";
 	
-	$min_checksum = 0;
-	$min_token = 0;
-	$min_doc_id = 0;
+	$min_checksum 	= NULL;
+	$min_token 		= 0;
+	$min_doc_id 	= 0;
 
 	$token_insert_time = 0;
 	$statistic_total_time = 0;
@@ -206,7 +206,7 @@ try
 		}
 		
 		# document has changed => compress old data
-		if ( ($min_checksum > $start_checksum && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
+		if ( ($min_checksum !== NULL && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
 		{
 			++$document_count;
 			/* DeltaVBencode the document id here */
@@ -301,7 +301,7 @@ try
 		}
 
 		# token_id changes now ! 
-		if ( ($min_checksum > $start_checksum && $token !== $min_token) || $last_row ) 
+		if ( ($min_checksum !== NULL && $token !== $min_token) || $last_row ) 
 		{
 			$insert_sql .= ",($min_checksum,".$connection->quote($min_token).",$document_count,".$connection->quote($doc_id_string . $token_data_string).")";
 			++$x;

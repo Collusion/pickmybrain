@@ -130,10 +130,6 @@ try
 		$where_sql = "";
 	}
 	
-	# for fetching data
-	$datatemp_limit = 10000;
-	$sql_query_limit		= ceil($scale / $datatemp_limit);
-
 	$rows = 0;
 	$write_buffer_len = 250;
 	$flush_interval	= 	40;
@@ -142,10 +138,9 @@ try
 	$insert_sql 	= "";
 	$insert_escape 	= array();
 
-	$min_checksum = 0;
-	$min_token = 0;
-	$min_doc_id = 0;
-	$min_tok_2_id = 0;
+	$min_checksum 	= NULL;
+	$min_token 		= 0;
+	$min_doc_id 	= 0;
 
 	$token_insert_time = 0;
 	$statistic_total_time = 0;
@@ -227,7 +222,7 @@ try
 		}
 		
 		# document has changed => compress old data
-		if ( ($min_checksum > $start_checksum && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
+		if ( ($min_checksum !== NULL && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
 		{
 			++$document_count;
 			/* DeltaVBencode the document id here */
@@ -322,7 +317,7 @@ try
 		}
 
 		# token_id changes now ! 
-		if ( ($min_checksum > $start_checksum && $token !== $min_token) || $last_row ) 
+		if ( ($min_checksum !== NULL && $token !== $min_token) || $last_row ) 
 		{
 			/*  fetch and insert the old data into the new table */
 			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) )
@@ -536,6 +531,14 @@ try
 			$statistic_total_time = microtime(true)-$statistic_start;
 			$counter = 0;
 		}
+	}
+	
+	if ( !empty($oldrow) )
+	{
+		$insert_sql 	.= ",(".$oldrow["checksum"].",
+							".$connection->quote($oldrow["token"]).",
+							".$oldrow["doc_matches"].",
+							".$connection->quote($oldrow["doc_ids"]).")";
 	}
 
 	$latent_oldreads = 0;

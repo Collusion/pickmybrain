@@ -1,6 +1,6 @@
 <?php
 
-/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
@@ -67,7 +67,7 @@ else if ( isset($_GET["index_id"]) && is_numeric($_GET["index_id"]) )
   
    <!-- Favicons
 	================================================== -->
-	<link rel="shortcut icon" href="favicon.ico">
+	<link rel="shortcut icon" href="images/favicon.ico">
 	<script src='css/livesearch.js'></script>
 
 </head>
@@ -931,7 +931,7 @@ Hi there! Start configuration of your Pickmybrain search engine by selecting an 
 
          <div class="col g-7">
             <ul class="copyright">
-               <li>&copy; 2016 Pickmybrain</li>
+               <li>&copy; 2017 Pickmybrain</li>
                <li>Design by <a href="http://www.styleshout.com/" title="Styleshout">Styleshout</a></li>               
             </ul>
          </div>
@@ -2285,7 +2285,7 @@ catch ( PDOException $e )
 
          <div class="col g-7">
             <ul class="copyright">
-               <li>&copy; 2016 Pickmybrain</li>
+               <li>&copy; 2017 Pickmybrain</li>
                <li>Design by <a href="http://www.styleshout.com/" title="Styleshout">Styleshout</a></li>               
             </ul>
          </div>

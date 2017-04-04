@@ -11,11 +11,7 @@
 
 if ( $process_number === 0 )
 {
-	#echo "filepointer: \n";
-	#var_dump($f);
-	
-	#sleep(10);
-	
+
 	/* DATA PORTITION SEEKER */
 	$data_size = filesize($filepath);
 	$data_portition = (int)($data_size/$dist_threads);
@@ -49,17 +45,17 @@ if ( $process_number === 0 )
 			if ( $i+1 < $dist_threads ) 
 			{
 				# then, find the max checksum
-				fseek($f, $data_start+$data_portition);
+				fseek($f, $data_start+$data_portition);			
 				$line = fgets($f);
 				$line = fgets($f);
 				$p = explode(" ", trim($line));
-				$old_checksum = hexdec($p[0]);	
+				$old_checksum = $PackedIntegers->bytes_to_int($p[0]);
 				$temp_len = 0;
 				do
 				{
 					$line = fgets($f);
 					$p = explode(" ", trim($line));
-					$checksum = hexdec($p[0]);
+					$checksum = $PackedIntegers->bytes_to_int($p[0]);
 					$temp_len = strlen($line);
 						
 				} while ( $checksum === $old_checksum );
@@ -67,7 +63,8 @@ if ( $process_number === 0 )
 				# rewind until first complete row with the new checksum
 				fseek($f, ftell($f)-$temp_len);
 				$data_end = ftell($f);
-				$data_partitions[$i] = array($data_start, $old_checksum, $start_checksum);
+				# data start offset, maximum checksum (old data), minimum checksum (old data)
+				$data_partitions[$i] = array($data_start, $checksum, $start_checksum);
 			}
 			else
 			{

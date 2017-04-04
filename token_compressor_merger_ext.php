@@ -45,7 +45,9 @@ if ( !is_readable($filepath) )
 }
 
 $f = fopen($filepath, "r");
-
+	
+$PackedIntegers = new PackedIntegers();
+	
 require "data_partitioner.php";
 
 # launch sister processes here if multiprocessing is turned on! 
@@ -132,9 +134,9 @@ try
 	$insert_sql 	= "";
 	$insert_escape 	= array();
 
-	$min_checksum = 0;
-	$min_token = 0;
-	$min_doc_id = 0;
+	$min_checksum 	= 0;
+	$min_token 		= 0;
+	$min_doc_id 	= 0;
 
 	$token_insert_time = 0;
 	$statistic_total_time = 0;
@@ -166,7 +168,7 @@ try
 	{
 		$connection->beginTransaction();
 	}
-	
+
 	fseek($f, $data_partition[0]);
 	$maximum_checksum = (int)($data_partition[1]>>16);
 	$sql_checksum	  = (int)($data_partition[2]>>16);
@@ -187,47 +189,77 @@ try
 	$tokrow = $tokpdo->fetch(PDO::FETCH_ASSOC);
 	$tokrow["checksum"] = +$tokrow["checksum"];
 	
+	$stored_lines = array();
+	
 	while ( !$last_row )
 	{
 		++$counter;
 		
-		if ( $line = fgets($f) )
+		if ( !empty($stored_lines) )
 		{
-			$p = explode(" ", preg_replace('/ {2,}/', ' ', trim($line)));
+			# if this is a web-index, reset old document id to disable delta decoding
+			if ( $index_type === 1 )
+			{
+				$doc_id = 0;
+			}
 			
-			$bigchecksum 	= hexdec($p[0]);
+			foreach ( $stored_lines as $stored_id => $line )
+			{
+				$p = explode(" ", $line);
+				$doc_id 		= $PackedIntegers->bytes_to_int($p[0])+$doc_id;
+						
+				if ( $sentiment_analysis ) 
+				{
+					$sentiscore = $PackedIntegers->bytes_to_int($p[1]);
+					$r = 2;
+				}
+				else
+				{
+					$r = 1;
+				}
+				break;
+			}
+			
+			unset($stored_lines[$stored_id]);
+		}
+		else if ( $line = fgets($f) )
+		{
+			$stored_lines = explode("  ", trim($line));
+			
+			$p = explode(" ", $stored_lines[0]);
+			unset($stored_lines[0]);
+
+			$bigchecksum 	= $PackedIntegers->bytes_to_int($p[0]);
 			$checksum 		= $bigchecksum>>16;
-			$doc_id 		= hexdec($p[1]);
-			
+			$doc_id 		= $PackedIntegers->bytes_to_int($p[1]);
+					
 			if ( $sentiment_analysis ) 
 			{
-				$sentiscore = hexdec($p[2]);
+				$sentiscore = $PackedIntegers->bytes_to_int($p[2]);
 				$r = 3;
 			}
 			else
 			{
 				$r = 2;
 			}
-
-			$advances = 0;
+					
 			# advance token tables rowpointer ( if necessary ) 
 			while ( $tokrow["checksum"] < $bigchecksum )
 			{
-				++$advances;
-				$beforevalue = $tokrow["checksum"];
+				#$beforevalue = $tokrow["checksum"];
 				$tokrow = $tokpdo->fetch(PDO::FETCH_ASSOC);
 				$tokrow["checksum"] = +$tokrow["checksum"];
 			}
-
-			$token 		= $tokrow["token"];
+		
+			$token 		= $tokrow["token"];	
 		}
 		else
 		{
 			$last_row = true;
 		}
-		
+
 		# document has changed => compress old data
-		if ( ($min_token && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
+		if ( ($min_token !== 0 && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
 		{
 			++$document_count;
 			/* DeltaVBencode the document id here */
@@ -313,7 +345,7 @@ try
 		}
 
 		# token_id changes now ! 
-		if ( ($min_token && $token !== $min_token) || $last_row ) 
+		if ( ($min_token !== 0 && $token !== $min_token) || $last_row ) 
 		{
 			/*  fetch and insert the old data into the new table */
 			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) )
@@ -358,6 +390,8 @@ try
 					++$oldreads;
 				}
 			}
+			
+			
 
 			# if these rows are to be combined
 			if ( $oldrow && $min_checksum == $oldrow["checksum"]  )
@@ -395,7 +429,7 @@ try
 					# fetch next oldrow from database
 					$oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC); 
 					++$oldreads;
-
+					
 					if ( $oldrow["checksum"] == $min_checksum && $oldrow["token"] == $min_token )
 					{
 						# combine old data with new data !
@@ -411,7 +445,8 @@ try
 						++$x;
 						++$w;
 
-						$oldrow = $oldrow_copy; # this row is not yet inserted 
+						$oldrow = $oldrow_copy; # this row is not yet inserted
+						unset($oldrow_copy); 
 					}
 					else
 					{
@@ -431,7 +466,7 @@ try
 							$row_storage = $oldrow;
 							unset($oldrow);
 							$oldrow = $oldrow_copy;
-							unset($oldrow_copy);							
+							unset($oldrow_copy);	
 						}
 						
 						else
@@ -480,7 +515,7 @@ try
 				}
 			}	
 			
-			if ( $min_checksum >= $maximum_checksum ) 
+			if ( $checksum >= $maximum_checksum ) 
 			{
 				# end the process when checksum changes
 				break;
@@ -489,7 +524,7 @@ try
 
 		while ( isset($p[$r]) )
 		{
-			$token_match_data[] = hexdec($p[$r]);
+			$token_match_data[] = $PackedIntegers->bytes_to_int($p[$r]);
 			++$r;
 		}
 
@@ -500,7 +535,7 @@ try
 		
 		# gather and write data
 		$min_checksum 	= $checksum;
-		$min_token 	= $token;
+		$min_token 		= $token;
 		$min_doc_id 	= $doc_id;
 		$min_token		= $token;
 		
@@ -514,7 +549,7 @@ try
 					
 			if ( !$permission )
 			{
-				$subpdo->closeCursor();
+				$tokpdo->closeCursor();
 				$oldpdo->closeCursor();
 				if ( $process_number > 0 ) 
 				{
@@ -534,6 +569,24 @@ try
 			$statistic_total_time = microtime(true)-$statistic_start;
 			$counter = 0;
 		}
+	}
+
+	if ( !empty($row_storage) )
+	{
+		$insert_sql 	.= ",(".$row_storage["checksum"].",
+							".$connection->quote($row_storage["token"]).",
+							".$row_storage["doc_matches"].",
+							".$connection->quote($row_storage["doc_ids"]).")";
+		unset($row_storage);
+	}
+	
+	if ( !empty($oldrow) )
+	{
+		$insert_sql 	.= ",(".$oldrow["checksum"].",
+							".$connection->quote($oldrow["token"]).",
+							".$oldrow["doc_matches"].",
+							".$connection->quote($oldrow["doc_ids"]).")";
+		unset($oldrow);
 	}
 
 	$latent_oldreads = 0;
@@ -607,10 +660,10 @@ catch ( PDOException $e )
 }
 
 # mainpdo is not needed anymore
-if ( isset($subpdo) )
+if ( isset($tokpdo) )
 {
-	$subpdo->closeCursor();
-	unset($subpdo);
+	$tokpdo->closeCursor();
+	unset($tokpdo);
 }
 
 # mainpdo is not needed anymore
@@ -633,17 +686,6 @@ $interval = microtime(true) - $timer;
 echo "All token processes have now finished, $interval seconds elapsed, starting to transfer data... \n";
 echo "Oldreads: $oldreads \n";
 echo "Latent oldreads: $latent_oldreads \n";
-
-
-try
-{
-	# remove the temporary table
-	#$connection->exec("DROP TABLE PMBdatatemp$index_suffix");	
-}
-catch ( PDOException $e ) 
-{
-	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
-}
 
 try
 {
@@ -685,6 +727,7 @@ try
 			}
 			
 			$temppdo->closeCursor();
+			unset($temppdo);
 			
 			# rest of the values
 			if ( !empty($ins_sql) ) 

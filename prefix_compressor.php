@@ -142,6 +142,7 @@ try
 	$write_buffer_len 		= 250;
 	$flush_interval			= 40;
 	$insert_counter 		= 0;
+	$min_checksum			= NULL;
 
 	$pdo = $unbuffered_connection->query("SELECT 
 								checksum,
@@ -165,15 +166,15 @@ try
 		$combined		= (int)$row["combined"];
 		
 		# different checksum ! 
-		if ( $min_checksum > $start_checksum && $checksum !== $min_checksum ) 
+		if ( $min_checksum !== NULL && $checksum !== $min_checksum ) 
 		{
 			# sort combinations
-			sort($combinations);
+			ksort($combinations);
 
 			$delta = 1;
 			$bin_data = "";
 			
-			foreach ( $combinations as $c_i => $integer )
+			foreach ( $combinations as $integer => $ind )
 			{
 				$tmp = $integer-$delta+1;
 				
@@ -224,7 +225,7 @@ try
 			$combinations = array();
 		}
 		
-		$combinations[] = $combined;
+		$combinations[$combined] = 1;
 
 		++$x;	
 		
@@ -266,9 +267,9 @@ try
 	# compress remaining data
 	if ( !empty($combinations) )
 	{
-		sort($combinations);
+		ksort($combinations);
 				
-		$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
+		$bin_data = DeltaVBencode(array_keys($combinations), $hex_lookup_encode);
 								
 		$temp_sql .= ",($min_checksum, ".$connection->quote($bin_data).")";
 		++$s;
@@ -293,6 +294,11 @@ catch ( PDOException $e )
 {
 	echo "error during PMBPrefixes: ";
 	echo $e->getMessage();
+}
+
+if ( !empty($pdo) )
+{
+	$pdo->closeCursor();
 }
 
 # wait for another processes to finish
@@ -342,7 +348,6 @@ try
 		{
 			$ins_sql[0] = " ";
 			$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
-			#$inspdo->execute($escape);
 			$ins_sql = "";
 			$insert_counter = 0;
 		}
@@ -362,7 +367,7 @@ catch ( PDOException $e )
 try
 {
 	# remove the temporary table
-	#$connection->exec("DROP TABLE PMBpretemp$index_suffix");	
+	$connection->exec("DROP TABLE PMBpretemp$index_suffix");	
 }
 catch ( PDOException $e ) 
 {

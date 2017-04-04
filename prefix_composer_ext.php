@@ -159,16 +159,19 @@ try
 	$filepath = $directory . "/pretemp_".$index_id."_".$process_number.".txt";
 	$f = fopen($filepath, "a");
 	
+	$PackedIntegers = new PackedIntegers();
+	
 	$write_buffer = array();
 	$pdo = $unbuffered_connection->query("SELECT token FROM PMBtoktemp$index_suffix $where_sql");
 	
 	echo "Prefix composer sql: SELECT token FROM PMBtoktemp$index_suffix $where_sql \n";
+	$delta_values = array();
 	
 	while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) ) 
 	{	
 		++$token_total_count;
 		$token = $row["token"];
-		$token_crc32 = crc32($token);
+		$token_crc32_shifted = crc32($token)<<6;
 	
 		# dialect processing: remove dialect ( ä, ö, å + etc) from tokens and add as prefix
 		if ( !empty($dialect_find) )
@@ -179,8 +182,16 @@ try
 				# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
 				++$pr;
 				$prefix_word = crc32($nodialect);
-				if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
-				$write_buffer[$prefix_word] .= " ".dechex($token_crc32 << 6);
+				if ( empty($write_buffer[$prefix_word]) )
+				{
+					#$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted);
+					$write_buffer[$prefix_word] = array($token_crc32_shifted);
+				}
+				else
+				{
+					#$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted);
+					$write_buffer[$prefix_word][] = $token_crc32_shifted;
+				}
 			}
 		}
 		
@@ -204,9 +215,17 @@ try
 						for ( $j = 0 ; ($i + $j) <= $wordlen ; ++$j )
 						{
 							$prefix_word = crc32(mb_substr($token, $j, $i));
-							if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
-							$write_buffer[$prefix_word] .= " ".dechex(($token_crc32 << 6)|($wordlen-$i));
-							# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
+							if ( empty($write_buffer[$prefix_word]) ) 
+							{
+								#$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+								$write_buffer[$prefix_word] = array($token_crc32_shifted|($wordlen-$i));
+							}
+							else
+							{
+								#$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+								$write_buffer[$prefix_word][] = $token_crc32_shifted|($wordlen-$i);
+							}
+
 							++$pr;
 						}
 					}
@@ -218,9 +237,15 @@ try
 					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
 					{
 						$prefix_word = crc32(mb_substr($token, 0, $i));
-						if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
-						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
-						$write_buffer[$prefix_word] .= " ".dechex(($token_crc32 << 6)|($wordlen-$i));
+						if ( empty($write_buffer[$prefix_word]) )
+						{
+							$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+						}
+						else
+						{
+							$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+						}
+
 						++$pr;
 					}
 					
@@ -228,9 +253,15 @@ try
 					for ( $i = 1 ; $wordlen-$i >= $min_prefix_len ; ++$i )
 					{
 						$prefix_word = crc32(mb_substr($token, $i));
-						if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
-						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
-						$write_buffer[$prefix_word] .= " ".dechex(($token_crc32 << 6)|$i);
+						if ( empty($write_buffer[$prefix_word]) )
+						{
+							$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|$i);
+						}
+						else
+						{
+							$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|$i);
+						}
+						
 						++$pr;
 					}
 				}
@@ -240,9 +271,15 @@ try
 					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
 					{
 						$prefix_word = crc32(mb_substr($token, 0, $i)); 
-						if ( empty($write_buffer[$prefix_word]) ) $write_buffer[$prefix_word] = "";
-						# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
-						$write_buffer[$prefix_word] .= " ".dechex(($token_crc32 << 6)|($wordlen-$i));
+						if ( empty($write_buffer[$prefix_word]) ) 
+						{
+							$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+						}
+						else
+						{
+							$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+						}
+
 						++$pr;
 					}
 				}
@@ -250,13 +287,24 @@ try
 		}
 		
 		# if we have over 2000 prefixes already, insert them here and reset 
-		if ( $pr > 20000 )
+		if ( $pr > 40000 )
 		{
 			$write_buf = "";
 			$ins_start = microtime(true);
 			foreach ( $write_buffer as $checksum => $tokdata ) 
 			{
-				$write_buf .= sprintf("%8X", $checksum)."$tokdata\n";
+				sort($tokdata);
+				$write_buf .= $PackedIntegers->int32_to_bytes5($checksum);
+				$delta = 0;
+				
+				foreach ( $tokdata as $checksum_38bit )
+				{
+					$write_buf .= " ".$PackedIntegers->int_to_bytes($checksum_38bit-$delta);
+					$delta = $checksum_38bit;
+				}
+				
+				$write_buf .= "\n";
+				#$write_buf .= $PackedIntegers->int32_to_bytes5($checksum)."$tokdata\n";
 				++$data_rows;
 			}
 						
@@ -282,9 +330,21 @@ try
 	{
 		$write_buf = "";
 		$ins_start = microtime(true);
+		
 		foreach ( $write_buffer as $checksum => $tokdata ) 
 		{
-			$write_buf .= sprintf("%8X", $checksum)."$tokdata\n";
+			sort($tokdata);
+			$write_buf .= $PackedIntegers->int32_to_bytes5($checksum);
+			$delta = 0;
+				
+			foreach ( $tokdata as $checksum_38bit )
+			{
+				$write_buf .= " ".$PackedIntegers->int_to_bytes($checksum_38bit-$delta);
+				$delta = $checksum_38bit;
+			}
+			
+			$write_buf .= "\n";
+			#$write_buf .= $PackedIntegers->int32_to_bytes5($checksum)."$tokdata\n";
 			++$data_rows;
 		}
 					

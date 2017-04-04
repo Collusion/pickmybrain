@@ -44,6 +44,8 @@ if ( !is_readable($filepath) )
 	return;
 }
 
+$PackedIntegers = new PackedIntegers();
+	
 $f = fopen($filepath, "r");
 
 require "data_partitioner.php";
@@ -107,7 +109,7 @@ try
 	}
 	else
 	{
-		if ( empty($replace_index) && $clean_slate )  # && empty($delta_indexing)
+		if ( empty($replace_index) && $clean_slate ) 
 		{
 			$target_table = "PMBTokens$index_suffix";
 		}
@@ -134,9 +136,9 @@ try
 	$w = 0;
 	$insert_sql = "";
 	
-	$min_checksum = 0;
-	$min_token = 0;
-	$min_doc_id = 0;
+	$min_checksum 	= 0;
+	$min_token 		= 0;
+	$min_doc_id 	= 0;
 
 	$token_insert_time = 0;
 	$statistic_total_time = 0;
@@ -170,7 +172,7 @@ try
 	}
 	
 	$min_token = 0;
-	
+
 	fseek($f, $data_partition[0]);
 	$maximum_checksum = (int)($data_partition[1]>>16);
 	$sql_checksum	  = (int)($data_partition[2]>>16);
@@ -184,48 +186,75 @@ try
 	$tokrow = $tokpdo->fetch(PDO::FETCH_ASSOC);
 	$tokrow["checksum"] = +$tokrow["checksum"];
 	
+	$stored_lines = array();
+	
 	while ( !$last_row )
 	{
-		++$counter;
-
-		if ( $line = fgets($f) )
+		if ( !empty($stored_lines) )
 		{
-			$p = explode(" ", preg_replace('/ {2,}/', ' ', trim($line)));
+			# if this is a web-index, reset old document id to disable delta decoding
+			if ( $index_type === 1 )
+			{
+				$doc_id = 0;
+			}
 			
-			$bigchecksum 	= hexdec($p[0]);
+			foreach ( $stored_lines as $stored_id => $line )
+			{
+				$p = explode(" ", $line);
+				$doc_id 		= $PackedIntegers->bytes_to_int($p[0])+$doc_id;
+						
+				if ( $sentiment_analysis ) 
+				{
+					$sentiscore = $PackedIntegers->bytes_to_int($p[1]);
+					$r = 2;
+				}
+				else
+				{
+					$r = 1;
+				}
+				break;
+			}
+			
+			unset($stored_lines[$stored_id]);
+		}
+		else if ( $line = fgets($f) )
+		{
+			$stored_lines = explode("  ", trim($line));
+			
+			$p = explode(" ", $stored_lines[0]);
+			unset($stored_lines[0]);
+
+			$bigchecksum 	= $PackedIntegers->bytes_to_int($p[0]);
 			$checksum 		= $bigchecksum>>16;
-			$doc_id 		= hexdec($p[1]);
-			
+			$doc_id 		= $PackedIntegers->bytes_to_int($p[1]);
+					
 			if ( $sentiment_analysis ) 
 			{
-				$sentiscore = hexdec($p[2]);
+				$sentiscore = $PackedIntegers->bytes_to_int($p[2]);
 				$r = 3;
 			}
 			else
 			{
 				$r = 2;
 			}
-			
+					
 			# advance token tables rowpointer ( if necessary ) 
 			while ( $tokrow["checksum"] < $bigchecksum )
 			{
-				$beforevalue = $tokrow["checksum"];
+				#$beforevalue = $tokrow["checksum"];
 				$tokrow = $tokpdo->fetch(PDO::FETCH_ASSOC);
 				$tokrow["checksum"] = +$tokrow["checksum"];
 			}
-
-			$token 		= $tokrow["token"];
-			
+		
+			$token 		= $tokrow["token"];	
 		}
 		else
 		{
 			$last_row = true;
 		}
-		
-		# token ids are not in order
-		
+
 		# document has changed => compress old data
-		if ( ($min_token && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
+		if ( ($min_token !== 0 && ($doc_id !== $min_doc_id || $token !== $min_token)) || $last_row ) 
 		{
 			++$document_count;
 			/* DeltaVBencode the document id here */
@@ -246,6 +275,7 @@ try
 				}
 			}
 			while ( $tmp ) ;
+			#$m_delta = $unpacked_doc_id;
 			$m_delta = $min_doc_id;
 			
 			/* VBencode the sentiment score here */
@@ -311,7 +341,7 @@ try
 		}
 
 		# token_id changes now ! 
-		if ( ($min_token && $token !== $min_token) || $last_row ) 
+		if ( ($min_token !== 0 && $token !== $min_token) || $last_row ) 
 		{
 			$insert_sql .= ",($min_checksum,".$connection->quote($min_token).",$document_count,".$connection->quote($doc_id_string . $token_data_string).")";
 			++$x;
@@ -345,7 +375,7 @@ try
 				}
 			}
 			
-			if ( $min_checksum >= $maximum_checksum ) 
+			if ( $checksum >= $maximum_checksum ) 
 			{
 				# end the process when checksum changes
 				break;
@@ -354,7 +384,7 @@ try
 		
 		while ( isset($p[$r]) )
 		{
-			$token_match_data[] = hexdec($p[$r]);
+			$token_match_data[] = $PackedIntegers->bytes_to_int($p[$r]);
 			++$r;
 		}
 
@@ -367,6 +397,8 @@ try
 		$min_checksum 	= $checksum;
 		$min_doc_id 	= $doc_id;
 		$min_token		= $token;
+		
+		++$counter;
 		
 		# check premissions every 10000th row
 		if ( $counter % 10000 === 0 ) 
@@ -415,8 +447,11 @@ try
 catch ( PDOException $e ) 
 {
 	$connection->rollBack();
-	echo "Error during PMBTokens ($process_number) : \n";
-	echo $e->getMessage();	
+	$string = "Error during PMBTokens ($process_number) : \n" . $e->getMessage() . "\n";
+	
+	echo $string;
+	
+	file_put_contents("/var/www/localsearch/errorlog_".$process_number.".txt", $string);
 }
 
 
@@ -486,6 +521,7 @@ try
 			}
 			
 			$temppdo->closeCursor();
+			unset($temppdo);
 			
 			# rest of the values
 			if ( !empty($ins_sql) ) 

@@ -165,9 +165,9 @@ try
 				die("already running");
 			}
 			# lastest indexing timestamp
-			else if ( $indexing_interval && time()-($indexing_interval*60) > (int)$row["updated"] && !$user_mode && !$test_mode )  
+			else if ( $indexing_interval && (int)$row["updated"] + ($indexing_interval*60) > time() && !$user_mode && !$test_mode )  
 			{
-				die("too soon");
+				die("indexing interval is enabled - you are trying to index too soon\n");
 			}
 			
 			$min_doc_id = (int)$row["max_id"]+1;
@@ -901,6 +901,8 @@ while ( true )
 					$t_pos = $pos;
 					foreach ( explode(" ", $blend_replacements[$match]) as $token_part ) 
 					{
+						if ( $token_part === "" ) continue;
+						
 						$temporary_token_ids[$token_part] = 1;
 						$crc32 = crc32($token_part);
 						$b = md5($token_part);

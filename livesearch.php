@@ -17,7 +17,7 @@ set_time_limit(10);
 livesearch.php
 */
 
-if ( !empty($_GET["q"]) )
+if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 {
 	
 	
@@ -125,7 +125,7 @@ if ( !empty($_GET["q"]) )
 		}
 
 		# print pagelist if necessary
-		if ( $result["total_matches"] > 10 ) 
+		if ( $result["total_matches"] > $slots ) 
 		{
 			$visible_result_count = $result["total_matches"];
 			if ( $result["total_matches"] > 1000 ) 

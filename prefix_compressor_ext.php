@@ -46,6 +46,8 @@ if ( !is_readable($filepath) )
 
 $f = fopen($filepath, "r");
 
+$PackedIntegers = new PackedIntegers();
+	
 require "data_partitioner.php";
 
 # launch sister processes here if multiprocessing is turned on! 
@@ -142,36 +144,39 @@ try
 	{
 		$connection->beginTransaction();
 	}
-	
+
 	fseek($f, $data_partition[0]);
-	$maximum_checksum = (int)$data_partition[1];	
+	$maximum_checksum = (int)$data_partition[1];
+	$min_checksum = NULL;
+	$last_row = false;
 	
-	$comb_count = 0;
-	$checksum_count = 0;
-	$valuecount = 0;
-	$min_checksum = 0;
-	
-	while ( ($line = fgets($f)) !== false )
+	while ( !$last_row )
 	{
 		++$rowcounter;
 		
-		$p = explode(" ", trim($line));
-		$checksum = hexdec($p[0]);
-		
-		# different checksum ! 
-		if ( $min_checksum && $checksum !== $min_checksum ) 
+		if ( $line = fgets($f) )
 		{
-			++$checksum_count;
+			$p = explode(" ", trim($line));
+			$checksum = $p[0]; # unpack later
+		}
+		else
+		{
+			$last_row = true;
+		}
+
+		# different checksum ! 
+		if ( ($min_checksum !== NULL && $checksum !== $min_checksum) || $last_row ) 
+		{
 			# sort combinations
-			sort($combinations);
+			ksort($combinations);
 
 			$delta = 1;
 			$bin_data = "";
 			
-			foreach ( $combinations as $c_i => $integer )
+			foreach ( $combinations as $integer => $ind )
 			{
 				$tmp = $integer-$delta+1;
-				
+
 				do
 				{
 					$lowest7bits = $tmp & 127;
@@ -191,7 +196,8 @@ try
 				$delta = $integer;
 			}
 
-			$temp_sql .= ",($min_checksum,".$connection->quote($bin_data).")";
+			$unpacked_checksum = $PackedIntegers->bytes_to_int($min_checksum);
+			$temp_sql .= ",($unpacked_checksum,".$connection->quote($bin_data).")";
 			++$s;
 
 			if ( $s >= $write_buffer_len ) 
@@ -218,7 +224,7 @@ try
 			unset($combinations, $bin_data);
 			$combinations = array();
 
-			if ( $min_checksum >= $maximum_checksum ) 
+			if ( $PackedIntegers->bytes_to_int($checksum) >= $maximum_checksum ) 
 			{
 				# end the process when checksum changes
 				break;
@@ -228,12 +234,13 @@ try
 		++$x;	
 		$min_checksum 		= $checksum;
 		
+		$v_delta = 0;
 		foreach ( $p as $ind => $pdata ) 
 		{
 			if ( $ind > 0 ) 
 			{
-				$combinations[] = hexdec($pdata);
-				++$comb_count;
+				$v_delta = $PackedIntegers->bytes_to_int($pdata)+$v_delta;
+				$combinations[$v_delta] = 1;
 			}
 		}
 		
@@ -247,7 +254,6 @@ try
 					
 			if ( !$permission )
 			{
-				#$connection->query("UPDATE PMBIndexes SET current_state = 0 WHERE ID = $index_id");
 				if ( $process_number > 0 ) 
 				{
 					SetProcessState($index_id, $process_number, 0);
@@ -272,17 +278,6 @@ try
 	fclose($f);
 	
 	$tokens_end = microtime(true) - $tokens_start;
-	
-	# compress remaining data
-	if ( !empty($combinations) )
-	{
-		sort($combinations);
-			
-		$bin_data = DeltaVBencode($combinations, $hex_lookup_encode);
-							
-		$temp_sql .= ",($min_checksum,".$connection->quote($bin_data).")";
-		++$s;
-	}
 					
 	# after, try if there is still some data left
 	if ( !empty($temp_sql) )
@@ -348,6 +343,7 @@ try
 			}
 			
 			$temppdo->closeCursor();
+			unset($temppdo);
 			
 			# rest of the values
 			if ( !empty($ins_sql) ) 

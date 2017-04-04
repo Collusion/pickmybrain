@@ -9,6 +9,134 @@
  * or visit: http://www.pickmybra.in
  */
  
+class PackedIntegers
+{
+	private $bytes_to_int_lookup;
+	private $int_to_bytes_lookup;
+	private $bytes_to_vbencoded_lookup;
+	private $bytes_to_vbencoded_end_lookup;
+	private $vb_binary_zero;
+	
+	public function __construct()
+	{
+		$this->vb_binary_zero = pack("H*", "80");
+		
+		# format look-up arrays
+		for ( $i = 33 ; $i < 161 ; ++$i )
+		{
+			$this->bytes_to_int_lookup[chr($i)] = $i-33;
+			$this->int_to_bytes_lookup[$i-33] = chr($i);
+			$this->bytes_to_vbencoded_lookup[chr($i)] = pack("H*", sprintf("%02x", $i-33));
+			$this->bytes_to_vbencoded_end_lookup[chr($i)] = pack("H*", sprintf("%02x", ($i-33)|128));
+		}
+	}
+	
+	public function bytes_to_int($string)
+	{
+		$p = 0;
+		$value = 0;
+		do
+		{
+			$value <<= 7;
+			$value |= $this->bytes_to_int_lookup[$string[$p]];
+			++$p;
+			
+		} while ( isset($string[$p]) );
+		
+		return $value;
+	}
+	
+	public function int_to_bytes($int)
+	{
+		$string = "";
+		do 
+		{
+			$string = $this->int_to_bytes_lookup[127&$int].$string;
+			$int >>= 7;
+		}
+		while ( $int );
+		
+		return $string;
+	}
+	
+	public function int32_to_bytes5($int)
+	{
+		$string = "!!!!!";
+		$p = 4;
+		do 
+		{
+			$string[$p] = $this->int_to_bytes_lookup[127&$int];
+			$int >>= 7;
+			--$p;
+		}
+		while ( $int && $p >= 0 );
+		
+		return $string;
+	}
+	
+	public function int38_to_bytes6($int)
+	{
+		$string = "!!!!!!";
+		$p = 5;
+		do 
+		{
+			$string[$p] = $this->int_to_bytes_lookup[127&$int];
+			$int >>= 7;
+			--$p;
+		}
+		while ( $int && $p >= 0 );
+		
+		return $string;
+	}
+	
+	public function int48_to_bytes7($int)
+	{
+		$string = "!!!!!!!";
+		$p = 6;
+		do 
+		{
+			$string[$p] = $this->int_to_bytes_lookup[127&$int];
+			$int >>= 7;
+			--$p;
+		}
+		while ( $int && $p >= 0 );
+		
+		return $string;
+	}
+	
+	public function bytes_to_vbencoded($string)
+	{
+		$p = 0;
+		$value = 0;
+		$compressed = $this->vb_binary_zero;
+		
+		# find the first non-zero 
+		while ( $string[$p] === "!" )
+		{
+			++$p;
+		}
+		
+		while ( isset($string[$p]) )
+		{
+			if ( !$value )
+			{
+				# first value needs to be 
+				$compressed = $this->bytes_to_vbencoded_end_lookup[$string[$p]];
+				++$value;
+			}
+			else
+			{
+				$compressed = $this->bytes_to_vbencoded_lookup[$string[$p]].$compressed;
+				
+			}
+
+			++$p;
+		}
+
+		return $compressed;
+	}
+} 
+ 
 function isSortSupported()
 {
 	if ( !function_exists('exec') || exec('echo EXEC') != 'EXEC' )
@@ -83,6 +211,7 @@ function checkPMBIndexes()
 	 current_state tinyint(3) unsigned NOT NULL,
 	 temp_loads int(8) unsigned NOT NULL,
 	 temp_loads_left int(8) unsigned NOT NULL,
+	 disabled_documents mediumblob NOT NULL,
 	 PRIMARY KEY (ID),
 	 UNIQUE KEY name (name)
 	) ENGINE=MYISAM DEFAULT CHARSET=utf8";
@@ -101,7 +230,8 @@ function checkPMBIndexes()
 	"indexing_started" 	=> "indexing_started int(10) unsigned NOT NULL",
 	"current_state" 	=> "current_state tinyint(3) unsigned NOT NULL",
 	"temp_loads" 		=> "temp_loads int(8) unsigned NOT NULL",
-	"temp_loads_left" 	=> "temp_loads_left int(8) unsigned NOT NULL"
+	"temp_loads_left" 	=> "temp_loads_left int(8) unsigned NOT NULL",
+	"disabled_documents" => "disabled_documents mediumblob NOT NULL"
 	);
 	
 	try
@@ -1857,7 +1987,7 @@ function url_basestructure($url, $http = true)
 	return $protocol.implode("/", array_slice($parts, 0, $i)).$end;
 }
 
-function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_doc_id, $limit = 0)
+function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_doc_id, $limit = 0, $write_buffer_len = 100)
 {
 	# alter the SQL query here if multiprocessing is turned on OR min_doc_id is greater than zero! 
 	if ( $dist_threads > 1 || $min_doc_id > 0 ) 
@@ -1903,12 +2033,18 @@ function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_do
 				}
 			}
 		}
-	
+		
+		$mod_value = $dist_threads * $write_buffer_len;
+		$mod_result_min = $write_buffer_len * $process_number;
+		$mod_result_max = $mod_result_min + $write_buffer_len;
+
 		$primary_column  =  trim($temp[1], " \t\n\r\0\x0B,");
 		if ( $dist_threads > 1 ) 
 		{
-			$main_sql_query  = $first_part . $where_cond . $prefix . "$primary_column % $dist_threads = $process_number ";
-			if ( $min_doc_id > 0  ) $main_sql_query .= " AND $primary_column >= $min_doc_id";
+			#$main_sql_query  = $first_part . $where_cond . $prefix . "$primary_column % $dist_threads = $process_number ";
+			$main_sql_query  = $first_part . $where_cond . $prefix . "$primary_column % $mod_value >= $mod_result_min AND $primary_column % $mod_value < $mod_result_max";
+			#$main_sql_query  = $first_part . $where_cond  ;
+			if ( $min_doc_id > 0 ) $main_sql_query .= " AND $primary_column >= $min_doc_id";
 		}
 		else # min_doc_id > 0 
 		{
@@ -1983,6 +2119,7 @@ function SetIndexingState($state, $index_id)
 	}
 	catch ( PDOException $e ) 
 	{
+		echo $e->getMessage() . "\n";
 		try
 		{
 			$perm = $connection->prepare("UPDATE PMBIndexes SET current_state = ?, indexing_permission = $indexing_permission, updated = UNIX_TIMESTAMP() WHERE ID = ?");
@@ -1990,6 +2127,7 @@ function SetIndexingState($state, $index_id)
 		}
 		catch ( PDOException $e ) 
 		{
+			echo $e->getMessage() . "\n";
 			return 0;
 		}
 	}
@@ -2107,7 +2245,6 @@ function SetProcessState($index_id, $process_number, $process_state)
 		catch ( PDOException $e ) 
 		{
 			echo "SetProcessState failure #2: " . $e->getMessage() . "\n";
-			#echo $e->getMessage();
 		}
 	}
 }

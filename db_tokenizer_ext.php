@@ -47,6 +47,8 @@ foreach ( $blend_chars as $blend_char )
 		$forbidden_tokens[$blend_char] = 1;
 	}
 }
+
+$PackedIntegers = new PackedIntegers();
 							
 $blend_chars_space[] = "&#13";
 
@@ -162,12 +164,12 @@ try
 			if ( $row["current_state"] ) 
 			{
 				# abort, because indexer is already running !  
-				die("already running");
+				die("already running\n");
 			}
 			# lastest indexing timestamp
-			else if ( $indexing_interval && time()-($indexing_interval*60) > (int)$row["updated"] && !$user_mode && !$test_mode )  
+			else if ( $indexing_interval && (int)$row["updated"] + ($indexing_interval*60) > time() && !$user_mode && !$test_mode )  
 			{
-				die("too soon");
+				die("indexing interval is enabled - you are trying to index too soon\n");
 			}
 			
 			$min_doc_id = (int)$row["max_id"]+1;
@@ -504,9 +506,9 @@ $main_sql_query = str_replace(array("\n", "\r", "\t"), " ", $main_sql_query);
 #echo "before modifying: $main_sql_query \n\n";
 
 $original_main_sql_query = $main_sql_query;
-$main_sql_query = ModifySQLQuery($original_main_sql_query, $dist_threads, $process_number, $min_doc_id, $ranged_query_value);
+$main_sql_query = ModifySQLQuery($original_main_sql_query, $dist_threads, $process_number, $min_doc_id, $ranged_query_value, $write_buffer_len);
 
-#echo "SQL ($process_number) " . $main_sql_query . "\n\n";
+echo "SQL ($process_number) " . $main_sql_query . "\n\n";
 
 try
 {
@@ -568,7 +570,7 @@ $temp_documents = 0;
 $insert_counter = 0;
 $flush_interval = 10;
 $toktemp_total_insert = 0;
-
+$previous_doc_id = 0;
 try
 {
 $data_rows = 0;
@@ -649,13 +651,80 @@ while ( true )
 		continue;
 	}
 	
+	# if multiprocessing is enabled, write buffer needs to be flushed 
+	if ( $dist_threads > 1 && $document_id % $write_buffer_len < $previous_doc_id % $write_buffer_len )
+	{
+		try
+		{
+			if ( !empty($temporary_token_ids) && count($temporary_token_ids) > 20000 )
+			{
+				$tempsql = "";
+				foreach ( $temporary_token_ids as $token => $val ) 
+				{
+					$b = md5($token);
+					$minichecksum = hexdec($b[0].$b[1].$b[2].$b[3]);
+					$tempsql .= ",(".$connection->quote($token).", ".crc32($token).", ".$minichecksum.")";
+				}
+				$tempsql[0] = " ";
+				$ins_start = microtime(true);
+				$tokpdo = $connection->query("INSERT IGNORE INTO PMBtoktemp$index_suffix (token, checksum, minichecksum) VALUES $tempsql");
+				$toktemp_total_insert += microtime(true)-$ins_start;
+				unset($temporary_token_ids);
+			}
+			
+			if ( !empty($cescape) )
+			{
+				$docinfo_time_start = microtime(true);
+				$count = count($docinfo_value_sets);
+				$docpdo = $connection->query("INSERT INTO $docinfo_target_table $docinfo_columns VALUES " . implode(",", $cescape) . "");	
+				++$insert_counter;		
+				
+				$log .= "docinfo ok \n";
+				$loop_log .= "docinfo ok \n";
+					
+				# update temporary statistics
+				$connection->query("UPDATE PMBIndexes SET 
+								temp_loads = temp_loads + $awaiting_writes,
+								updated = UNIX_TIMESTAMP(),
+								current_state = 1,
+								$doc_counter_target_column = $doc_counter_target_column + $awaiting_writes
+								WHERE ID = $index_id");
+								
+				$log .= "Index statistics ok \n";
+				$loop_log .= "Index statistics ok \n";
+	
+				# reset variables
+				$docinfo_value_sets = array();
+				$cescape 			= array();
+	
+				$docinfo_extra_time += (microtime(true)-$docinfo_time_start);
+			}
+		}
+		catch ( PDOException $e ) 
+		{
+		}
+		
+		if ( !empty($insert_buffer_array) )
+		{
+			$insert_buffer = "";
+			foreach ( $insert_buffer_array as $checksum_48bit => $doc_match_data ) 
+			{
+				$insert_buffer .= $PackedIntegers->int48_to_bytes7($checksum_48bit) . " $doc_match_data\n";
+			}
+
+			fwrite($f, $insert_buffer);
+			unset($insert_buffer, $insert_buffer_array, $insert_buffer_delta);
+			$awaiting_writes = 0;
+		}
+	}
+		
 	$word_sentiment_scores = array();
 	$document_avg_score = 0;
 	
 	# renew database connection if required
 	if ( $ranged_query_value && $temp_documents >= $ranged_query_value ) 
 	{
-		$new_main_sql = ModifySQLQuery($original_main_sql_query, $dist_threads, $process_number, $document_id+1, $ranged_query_value);
+		$new_main_sql = ModifySQLQuery($original_main_sql_query, $dist_threads, $process_number, $document_id+1, $ranged_query_value, $write_buffer_len);
 		echo "RENEWING: $new_main_sql \n\n";
 		unset($mainpdo);
 		
@@ -838,11 +907,11 @@ while ( true )
 				$temporary_token_ids[$match] = 1;
 				if ( !isset($tokens[$match]) ) 
 				{
-					$tokens[$match] = " ".dechex(($pos<<$bitshift)|$f_id);
+					$tokens[$match] = " ".$PackedIntegers->int_to_bytes(($pos<<$bitshift)|$f_id);
 				}
 				else
 				{
-					$tokens[$match] .= " ".dechex(($pos<<$bitshift)|$f_id);
+					$tokens[$match] .= " ".$PackedIntegers->int_to_bytes(($pos<<$bitshift)|$f_id);
 				}
 				
 				# if this token consists blend_chars and has a parallel version
@@ -851,14 +920,16 @@ while ( true )
 					$t_pos = $pos;
 					foreach ( explode(" ", $blend_replacements[$match]) as $token_part ) 
 					{
+						if ( $token_part === "" ) continue;
+						
 						$temporary_token_ids[$token_part] = 1;
 						if ( empty($tokens[$token_part]) ) 
 						{
-							$tokens[$token_part] = " ".dechex(($t_pos<<$bitshift)|$f_id);
+							$tokens[$token_part] = " ".$PackedIntegers->int_to_bytes(($t_pos<<$bitshift)|$f_id);
 						}
 						else
 						{
-							$tokens[$token_part] .= " ".dechex(($t_pos<<$bitshift)|$f_id);
+							$tokens[$token_part] .= " ".$PackedIntegers->int_to_bytes(($t_pos<<$bitshift)|$f_id);
 						}
 						++$t_pos;
 					}
@@ -871,6 +942,9 @@ while ( true )
 	
 	unset($expl, $fields);
 	
+	# micro-optimization :-)
+	$prepacked_document_id = $PackedIntegers->int32_to_bytes5($document_id);
+	
 	if ( $sentiment_analysis ) 
 	{
 		foreach ( $tokens as $token => $string ) 
@@ -878,6 +952,7 @@ while ( true )
 			$crc32 = crc32($token);
 			$b = md5($token);
 			$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+			$checksum_48bit = ($crc32<<16)|$tid;
 				
 			if ( isset($word_sentiment_scores[$token]) )
 			{
@@ -898,7 +973,18 @@ while ( true )
 				$wordsenti = 128; # equal to zero
 			}
 			
-			$insert_buffer .= sprintf("%12X %8X %X", ($crc32<<16)|$tid, $document_id, $wordsenti)."$string\n";
+			# PackedIntegers
+			if ( empty($insert_buffer_array[$checksum_48bit]) )
+			{
+				$insert_buffer_array[$checksum_48bit] = "$prepacked_document_id " . $PackedIntegers->int_to_bytes($wordsenti) . "$string";
+			}
+			else
+			{
+				$insert_buffer_array[$checksum_48bit] .= "  ".$PackedIntegers->int_to_bytes($document_id-$insert_buffer_delta[$checksum_48bit]) . " " . $PackedIntegers->int_to_bytes($wordsenti) . "$string";
+				
+			}
+			$insert_buffer_delta[$checksum_48bit] = $document_id;
+
 			++$data_rows;
 		}
 	}
@@ -909,13 +995,24 @@ while ( true )
 			$crc32 = crc32($token);
 			$b = md5($token);
 			$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+			$checksum_48bit = ($crc32<<16)|$tid;
 			
-			$insert_buffer .= sprintf("%12X %8X", ($crc32<<16)|$tid, $document_id)."$string\n";
+			if ( empty($insert_buffer_array[$checksum_48bit]) )
+			{
+				$insert_buffer_array[$checksum_48bit] = "$prepacked_document_id" . "$string";
+			}
+			else
+			{
+				$insert_buffer_array[$checksum_48bit] .= "  ".$PackedIntegers->int_to_bytes($document_id-$insert_buffer_delta[$checksum_48bit]) . " " . $PackedIntegers->int_to_bytes($wordsenti) . "$string";
+			}
+			$insert_buffer_delta[$checksum_48bit] = $document_id;
+
 			++$data_rows;
 		}
 	}
 	
 	unset($tokens, $fields);
+	#unset($fields);
 	
 	try
 	{
@@ -950,6 +1047,7 @@ while ( true )
 		++$awaiting_writes;
 		
 		# write buffer is full, write data now
+		
 		if ( $awaiting_writes % $write_buffer_len === 0 ) 
 		{				
 			if ( !empty($temporary_token_ids) && count($temporary_token_ids) > 20000 )
@@ -993,8 +1091,14 @@ while ( true )
 
 			$docinfo_extra_time += (microtime(true)-$docinfo_time_start);
 
-			fwrite($f, $insert_buffer);
 			$insert_buffer = "";
+			foreach ( $insert_buffer_array as $checksum_48bit => $doc_match_data ) 
+			{
+				$insert_buffer .= $PackedIntegers->int48_to_bytes7($checksum_48bit) . " $doc_match_data\n";
+			}
+
+			fwrite($f, $insert_buffer);
+			unset($insert_buffer, $insert_buffer_array, $insert_buffer_delta);
 			
 			$log .= "new word occurances ok \n";
 			$loop_log .= "new word occurances ok \n";
@@ -1039,6 +1143,8 @@ while ( true )
 		
 		return;
 	}
+	
+	$previous_doc_id = $document_id;
 }
 
 }
@@ -1087,8 +1193,14 @@ try
 
 		$docinfo_extra_time += (microtime(true)-$docinfo_time_start);
 
-		fwrite($f, $insert_buffer);
 		$insert_buffer = "";
+		foreach ( $insert_buffer_array as $checksum_48bit => $doc_match_data ) 
+		{
+			$insert_buffer .= $PackedIntegers->int48_to_bytes7($checksum_48bit) . " $doc_match_data\n";
+		}
+		fwrite($f, $insert_buffer);
+		#$insert_buffer = "";
+		unset($insert_buffer, $insert_buffer_array, $insert_buffer_delta);
 
 		$log .= "new word occurances ok \n";
 		$loop_log .= "new word occurances ok \n";	

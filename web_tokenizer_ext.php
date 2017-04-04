@@ -91,6 +91,8 @@ $invalid_filetypes = array("jpg" => 1,
 							 "msi" => 1,
 							 "rar" => 1,
 							 "dmg" => 1);
+							 
+$PackedIntegers = new PackedIntegers();
 						  				  
 # categories ( optional ) 
 $categories = array();
@@ -146,10 +148,10 @@ try
 			# abort, because indexer is already running !  
 			die("already running");
 		}
-		# lastest indexing timestamp
-		else if ( $indexing_interval && time()-($indexing_interval*60) > (int)$row["updated"] && !$user_mode && !$test_mode )  
+		# lastest indexing timestamp 
+		else if ( $indexing_interval && (int)$row["updated"] + ($indexing_interval*60) > time() && !$user_mode && !$test_mode )  
 		{
-			die("too soon");
+			die("indexing interval is enabled - you are trying to index too soon\n");
 		}
 		
 		$min_doc_id = (int)$row["max_id"]+1;
@@ -459,6 +461,7 @@ $awaiting_writes = 0;
 $data_rows = 0;
 $toktemp_total_insert = 0;
 $docinfo_extra_time = 0;
+$doc_prefix = chr(27);
 
 if ( !empty($mysql_data_dir) )
 {
@@ -521,7 +524,7 @@ while ( !empty($url_list[$lp]) )
 	# pdf file ! 
 	if ( stripos($complete_url, ".pdf") !== false ) 
 	{
-		if ( !empty($xpdf_folder) && $enable_exec ) 
+		if ( !empty($xpdf_folder) && $enable_exec && $index_pdfs ) 
 		{
 			$log .= "found pdf $url \n";
 			$dir = realpath(dirname(__FILE__));
@@ -1268,13 +1271,14 @@ while ( !empty($url_list[$lp]) )
 			if ( empty($forbidden_tokens[$match]) )
 			{
 				$temporary_token_ids[$match] = 1;
-				if ( empty($tokens[$match]) ) 
+
+				if ( !isset($tokens[$match]) ) 
 				{
-					$tokens[$match] = " ".dechex(($pos<<$bitshift)|$f_id);
+					$tokens[$match] = " ".$PackedIntegers->int_to_bytes(($pos<<$bitshift)|$f_id);
 				}
 				else
 				{
-					$tokens[$match] .= " ".dechex(($pos<<$bitshift)|$f_id);
+					$tokens[$match] .= " ".$PackedIntegers->int_to_bytes(($pos<<$bitshift)|$f_id);
 				}
 				
 				# if this token consists blend_chars and has a parallel version
@@ -1283,14 +1287,17 @@ while ( !empty($url_list[$lp]) )
 					$t_pos = $pos;
 					foreach ( explode(" ", $blend_replacements[$match]) as $token_part ) 
 					{
+						if ( $token_part === "" ) continue;
+						
 						$temporary_token_ids[$token_part] = 1;
+
 						if ( empty($tokens[$token_part]) ) 
 						{
-							$tokens[$token_part] = " ".dechex(($t_pos<<$bitshift)|$f_id);
+							$tokens[$token_part] = " ".$PackedIntegers->int_to_bytes(($t_pos<<$bitshift)|$f_id);
 						}
 						else
 						{
-							$tokens[$token_part] .= " ".dechex(($t_pos<<$bitshift)|$f_id);
+							$tokens[$token_part] .= " ".$PackedIntegers->int_to_bytes(($t_pos<<$bitshift)|$f_id);
 						}
 						++$t_pos;
 					}
@@ -1301,28 +1308,49 @@ while ( !empty($url_list[$lp]) )
 		}
 	}
 
-	$aw = $awaiting_writes;
+	$aw = $doc_prefix."$awaiting_writes";
 
 	unset($expl, $fields);
 	
-	if ( $sentiment_analysis )
+	if ( $sentiment_analysis ) 
 	{
 		foreach ( $tokens as $token => $string ) 
 		{
 			$crc32 = crc32($token);
 			$b = md5($token);
 			$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
-			
+			$checksum_48bit = ($crc32<<16)|$tid;
+				
 			if ( isset($word_sentiment_scores[$token]) )
 			{
 				$wordsenti = $word_sentiment_scores[$token];
+				if ( $wordsenti < -128 ) 
+				{
+					$wordsenti = -128;
+				}
+				else if ( $wordsenti > 127 )
+				{
+					$wordsenti = 127;
+				}
+				
+				$wordsenti = $wordsenti+128; # negative values not allowed
 			}
 			else
 			{
-				$wordsenti = 0;
+				$wordsenti = 128; # equal to zero
 			}
 			
-			$insert_buffer .= sprintf("%12X :$aw %X", ($crc32<<16)|$tid, $wordsenti)."$string\n";
+			# PackedIntegers
+			if ( empty($insert_buffer_array[$checksum_48bit]) )
+			{
+				$insert_buffer_array[$checksum_48bit] = "$aw " . $PackedIntegers->int_to_bytes($wordsenti) . "$string";
+			}
+			else
+			{
+				$insert_buffer_array[$checksum_48bit] .= "  $aw " . $PackedIntegers->int_to_bytes($wordsenti) . "$string";
+				
+			}
+
 			++$data_rows;
 		}
 	}
@@ -1333,8 +1361,17 @@ while ( !empty($url_list[$lp]) )
 			$crc32 = crc32($token);
 			$b = md5($token);
 			$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+			$checksum_48bit = ($crc32<<16)|$tid;
 			
-			$insert_buffer .= sprintf("%12X", ($crc32<<16)|$tid)." :$aw".$string."\n";
+			if ( empty($insert_buffer_array[$checksum_48bit]) )
+			{
+				$insert_buffer_array[$checksum_48bit] = "$aw" . "$string";
+			}
+			else
+			{
+				$insert_buffer_array[$checksum_48bit] .= "  $aw" . "$string";
+			}
+
 			++$data_rows;
 		}
 	}
@@ -1432,19 +1469,26 @@ while ( !empty($url_list[$lp]) )
 			{
 				if ( isset($temporary_ids[$j]) )
 				{
-					$insert_find[] = ":$j";
-					$insert_repl[] = "$i";
+					$insert_find[] = $doc_prefix."$j";
+					$insert_repl[] = $PackedIntegers->int32_to_bytes5($i);
 				}
 				++$j;
 			}
-			
-			$insert_buffer = str_replace($insert_find, $insert_repl, $insert_buffer);
-				
+	
 			$log .= "token data inserts start  \n";
 			$loop_log .= "token data inserts start  \n";
 
-			fwrite($f, $insert_buffer);
 			$insert_buffer = "";
+			foreach ( $insert_buffer_array as $checksum_48bit => $doc_match_data ) 
+			{
+				$insert_buffer .= $PackedIntegers->int48_to_bytes7($checksum_48bit) . " $doc_match_data\n";
+			}
+			
+			# replace the document id placeholders with actual document ids
+			$insert_buffer = str_replace($insert_find, $insert_repl, $insert_buffer);
+
+			fwrite($f, $insert_buffer);
+			unset($insert_buffer, $insert_buffer_array, $insert_buffer_delta);
 			
 			$log .= "token data inserts OK  \n";
 			$loop_log .= "token data inserts OK  \n";
@@ -1565,20 +1609,26 @@ try
 		{
 			if ( isset($temporary_ids[$j]) )
 			{
-				$insert_find[] = ":$j";
-				$insert_repl[] = "$i";
-					
+				$insert_find[] = $doc_prefix."$j";
+				$insert_repl[] = $PackedIntegers->int32_to_bytes5($i);					
 			}
 			++$j;
 		}
-			
-		$insert_buffer = str_replace($insert_find, $insert_repl, $insert_buffer);
-				
+					
 		$log .= "token data inserts start  \n";
 		$loop_log .= "token data inserts start  \n";
 
-		fwrite($f, $insert_buffer);
 		$insert_buffer = "";
+		foreach ( $insert_buffer_array as $checksum_48bit => $doc_match_data ) 
+		{
+			$insert_buffer .= $PackedIntegers->int48_to_bytes7($checksum_48bit) . " $doc_match_data\n";
+		}
+		
+		# replace the document id placeholders with actual document ids
+		$insert_buffer = str_replace($insert_find, $insert_repl, $insert_buffer, $r_count);
+
+		fwrite($f, $insert_buffer);
+		unset($insert_buffer, $insert_buffer_array, $insert_buffer_delta);
 		
 		$log .= "token data inserts OK  \n";
 		$loop_log .= "token data inserts OK  \n";

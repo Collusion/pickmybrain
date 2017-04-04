@@ -143,6 +143,7 @@ try
 	$write_buffer_len 		= 250;
 	$flush_interval			= 40;
 	$insert_counter 		= 0;
+	$min_checksum			= NULL;
 
 	$pdo = $unbuffered_connection->query("SELECT 
 								checksum,
@@ -188,7 +189,7 @@ try
 		}
 		
 		# different checksum ! 
-		if ( ($min_checksum > $start_checksum && $checksum !== $min_checksum) || $last_row ) 
+		if ( ($min_checksum !== NULL && $checksum !== $min_checksum) || $last_row ) 
 		{
 			while ( $oldrow && ($min_checksum > $oldrow["checksum"]) ) 
 			{
@@ -321,6 +322,11 @@ try
 			$rowcounter = 0;
 		}
 	}
+	
+	if ( !empty($oldrow) )
+	{
+		$temp_sql .= ",(".$oldrow["checksum"].", ".$connection->quote($oldrow["tok_data"]).")";
+	}
 
 	# rest of the old data ( if availabe ) 
 	while ( $oldrow = $oldpdo->fetch(PDO::FETCH_ASSOC) )
@@ -372,6 +378,16 @@ catch ( PDOException $e )
 	echo $e->getMessage();
 }
 
+if ( !empty($oldpdo) )
+{
+	$oldpdo->closeCursor();
+}
+
+if ( !empty($pdo) )
+{
+	$pdo->closeCursor();
+}
+
 # wait for another processes to finish
 require("process_listener.php");
 
@@ -415,7 +431,7 @@ try
 		$temppdo->closeCursor();
 		
 		# rest of the values
-		if ( !empty($escape) ) 
+		if ( !empty($ins_sql) ) 
 		{
 			$ins_sql[0] = " ";
 			$inspdo = $connection->query("INSERT INTO $target_table (checksum, tok_data) VALUES $ins_sql");
