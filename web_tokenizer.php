@@ -537,7 +537,7 @@ while ( !empty($url_list[$lp]) )
 	# pdf file ! 
 	if ( stripos($complete_url, ".pdf") !== false ) 
 	{
-		if ( !empty($xpdf_folder) && $enable_exec ) 
+		if ( !empty($xpdf_folder) && $enable_exec && $index_pdfs ) 
 		{
 			$log .= "found pdf $url \n";
 			$dir = realpath(dirname(__FILE__));
