@@ -1003,7 +1003,7 @@ while ( true )
 			}
 			else
 			{
-				$insert_buffer_array[$checksum_48bit] .= "  ".$PackedIntegers->int_to_bytes($document_id-$insert_buffer_delta[$checksum_48bit]) . " " . $PackedIntegers->int_to_bytes($wordsenti) . "$string";
+				$insert_buffer_array[$checksum_48bit] .= "  ".$PackedIntegers->int_to_bytes($document_id-$insert_buffer_delta[$checksum_48bit]) . "$string";
 			}
 			$insert_buffer_delta[$checksum_48bit] = $document_id;
 
