@@ -161,10 +161,9 @@ queried while searching. If you wish to merge new data into existing data,
 do not invoke the indexer with purge or replace parameter.
 
 Unfortunately Pickmybrain does not support modifying of already indexed data.
-At some point I will probably implement a kill-list feature which maintains 
-a list of non-wanted document ids and reduces them from search results if 
-necessary.
-
+However, unwanted or deprecated document ids can be disabled with the API.
+For detailed instructions, please see API documentation in
+http://www.pickmybra.in/api.php
 
 How to search
 -------------
