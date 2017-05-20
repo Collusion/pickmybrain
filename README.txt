@@ -7,7 +7,7 @@ Published: 04.04.2017
 copyright 2015-2017 Henri Ruutinen 
 
 email: henri.ruutinen@pickmybra.in
-website: http://www.pickmybra.in
+website: http://www.hollilla.com/pickmybrain
 
 
 Overview
@@ -47,7 +47,7 @@ under the GPLv3, or purchase a commercial Pickmybrain source license.
 If you're interested in commercial licensing, please see the Pickmybrain 
 web site:
 
-    http://www.pickmybra.in
+    http://www.hollilla.com/pickmybrain
 
 
 Compatibility
@@ -75,7 +75,7 @@ Getting Pickmybrain
 -------------------
 
 The latest version is available from:
-http://www.pickmybra.in
+http://www.hollilla.com/pickmybrain
 
 
 Installation
@@ -174,7 +174,7 @@ into your own application:
 1. For PHP applications, use the Pickmybrain API.
 
 For detailed instructions, please view the Pickmybrain API documentation 
-in http://www.pickmybra.in/api.php
+in http://www.hollilla.com/pickmybrain/api.php
 
 2. You can also search from the command line and thus use Pickmybrain
 with other programming languages as well. Please run the file
