@@ -1,12 +1,12 @@
 Pickmybrain
 -----------
 
-Version:   1.00 Release 
-Published: 04.04.2017
+Version:   1.01 Release 
+Published: 24.05.2017
 
 copyright 2015-2017 Henri Ruutinen 
 
-email: henri.ruutinen@pickmybra.in
+email: henri.ruutinen@gmail.com
 website: http://www.hollilla.com/pickmybrain
 
 
@@ -163,7 +163,7 @@ do not invoke the indexer with purge or replace parameter.
 Unfortunately Pickmybrain does not support modifying of already indexed data.
 However, unwanted or deprecated document ids can be disabled with the API.
 For detailed instructions, please see API documentation in
-http://www.pickmybra.in/api.php
+http://www.hollilla.com/pickmybrain/api.php
 
 How to search
 -------------

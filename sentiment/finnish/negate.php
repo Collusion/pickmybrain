@@ -9,13 +9,20 @@
  * or visit: http://www.hollilla.com/pickmybrain
  */
 
-/*
-	Please change these values to your liking
+/* 
+	List of words that negate/inverse the meaning of immediately following phrases 
+	For Finnish language
 */
 
-define("PMB_USERNAME", "defaultuser"); # username
-define("PMB_PASSWORD", "defaultpass"); # password
-define("PMB_SESSIONLEN", 3600);		   # session length in seconds ( 0 = disable )
-
+$data = array(
+"eivät ole" => 1,
+"ei ole" => 1,
+"eivät olleet" => 1,
+"ei ollut" => 1,
+"en ole" => 1,
+"en ollut" => 1,
+"ei oo" => 1,
+"ei" => 1,
+);
 
 ?>

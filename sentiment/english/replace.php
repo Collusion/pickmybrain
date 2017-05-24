@@ -9,13 +9,17 @@
  * or visit: http://www.hollilla.com/pickmybrain
  */
 
-/*
-	Please change these values to your liking
+/* 
+	List of shorthand expressions that will be replaced with relevant words
+	For English language
 */
 
-define("PMB_USERNAME", "defaultuser"); # username
-define("PMB_PASSWORD", "defaultpass"); # password
-define("PMB_SESSIONLEN", 3600);		   # session length in seconds ( 0 = disable )
-
+$data = array(
+"ain't" => "not",
+"aren't" => "not",
+"isn't" => "not",
+"shouldn't" => "not",
+"couldn't" => "not"
+);
 
 ?>

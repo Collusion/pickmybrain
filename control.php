@@ -5,8 +5,8 @@
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@pickmybra.in
- * or visit: http://www.pickmybra.in
+ * with this file. If not, please write to: henri.ruutinen@gmail.com
+ * or visit: http://www.hollilla.com/pickmybrain
  */
 
 ini_set("display_errors", 1);
