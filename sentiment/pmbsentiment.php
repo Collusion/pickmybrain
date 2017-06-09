@@ -91,12 +91,12 @@ class PMBSentiment
 		if ( $language === 'fi' )
 		{
 			# finnish
-			$this->dictionaryPath = '/var/www/sentiment/finnish/';
+			$this->dictionaryPath = realpath(dirname(__FILE__)) . '/finnish/';
 		}
 		else
 		{
 			# default: english
-			$this->dictionaryPath = '/var/www/sentiment/english/';
+			$this->dictionaryPath = realpath(dirname(__FILE__)) . '/english/';
 		}
 		
 		# format member variables
