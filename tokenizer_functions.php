@@ -1,12 +1,12 @@
 <?php
 
-/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * with this file. If not, please write to: henri.ruutinen@pickmybra.in
+ * or visit: http://www.pickmybra.in
  */
  
 class PackedIntegers
@@ -477,7 +477,7 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 	else
 	{
 		# the external PDO connection is defined in this file
-		require "ext_db_connection_".$index_id.".php"; 
+		require_once "ext_db_connection_".$index_id.".php"; 
 		
 		# create a new instance of the connection
 		$ext_connection = call_user_func("ext_db_connection");
@@ -995,9 +995,15 @@ function write_settings(array $settings, $index_id = 0)
 			}
 			break;
 					
-			case 'expansion_limit':
 			case 'min_prefix_len':
 			if ( isset($setting_value) && is_integer((int)$setting_value) && $setting_value > 0 )
+			{
+				$$setting_name = $setting_value;
+			}
+			break;
+			
+			case 'expansion_limit':
+			if ( isset($setting_value) && is_integer((int)$setting_value) && $setting_value >= 0 )
 			{
 				$$setting_name = $setting_value;
 			}

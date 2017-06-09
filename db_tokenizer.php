@@ -1,12 +1,12 @@
 <?php
 
-/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * with this file. If not, please write to: henri.ruutinen@pickmybra.in
+ * or visit: http://www.pickmybra.in
  */
 
 ini_set('memory_limit', '1024M');
@@ -415,6 +415,10 @@ try
 			test_database_settings($index_id, $log);
 			
 			echo $log;
+			
+			SetProcessState($index_id, $process_number, 0);
+			SetIndexingState(0, $index_id);
+			
 			return;
 			# test mode ends
 		}
