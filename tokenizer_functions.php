@@ -542,6 +542,7 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 				$testpdo = $ext_connection->query($main_sql_query);
 				$data_array = array();
 				$data_count = 0;
+				$previous_doc_id = -1;
 				
 				while ( $row = $testpdo->fetch(PDO::FETCH_ASSOC) )
 				{
@@ -563,6 +564,13 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 								$log .= "Error: the first defined column does not seem to have a correct unsigned integer value.\n";
 								++$e_count;
 							}
+							else if ( $main_id_value <= $previous_doc_id )
+							{
+								$log .= "Error: the unique identifiers must be in ascending order.\n";
+								++$e_count;
+							}
+							
+							$previous_doc_id = $main_id_value;
 						}
 						# this column is defined as an attribute
 						# all attributes must have numeric values
@@ -2065,6 +2073,54 @@ function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_do
 	return $main_sql_query;
 }
 
+# shutdown function is an anonymous function
+# it requires a wrapper
+if ( isset($index_id) && isset($process_number) )
+{
+	$shutdown_function = function() use($index_id, $process_number, &$log) 
+	{ 
+		$error = error_get_last();
+		
+		# if script execution halted to an error
+		if ( $error['type'] === E_ERROR ) 
+		{
+			# include settings file ( again ) 
+			include "autoload_settings.php";
+			
+			if ( !empty($admin_email) )
+			{
+				$from_domain 	= "mydomain.com";
+				$from_mail 		= "sender@mydomain.com";
+				$mailtail 		= "\n\nRegards,\n$from_domain";
+				$message = $error['message'] . "\nIn file: " . $error['file'] . "\nOn line: " . $error['line'];
+				
+				mail($admin_email, "Fatal error occurred:\n", $message, 'From: ' . $from_domain . ' <'.$from_mail.'>', "-f $from_mail -r $from_mail");
+			}
+			
+			# Set indexing state ( again ) 
+			SetIndexingState(0, $index_id);
+			SetProcessState($index_id, $process_number, 0);
+		}
+		
+		# just to be sure
+		# if multiprocessing is enabled, reset process states 
+		if ( $process_number > 0 ) 
+		{
+			SetProcessState($index_id, $process_number, 0);
+		}
+		else
+		{
+			# write log file
+			$log_file_path = realpath(dirname(__FILE__)) . "/log_".$index_id.".txt";
+			file_put_contents($log_file_path, $log);
+			
+			# if we are in the main process
+			SetIndexingState(0, $index_id);
+			SetProcessState($index_id, $process_number, 0);
+		}
+	};
+}
+
 function shutdown($index_id, $process_number = 0)
 {
 	$error = error_get_last();
@@ -2094,7 +2150,12 @@ function shutdown($index_id, $process_number = 0)
 	# if multiprocessing is enabled, reset process states 
 	if ( $process_number > 0 ) 
 	{
-		#echo "Now we are in the shutdown function\n";
+		SetProcessState($index_id, $process_number, 0);
+	}
+	else
+	{
+		# if we are in the main process
+		SetIndexingState(0, $index_id);
 		SetProcessState($index_id, $process_number, 0);
 	}
 }

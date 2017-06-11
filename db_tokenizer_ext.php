@@ -29,7 +29,7 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 }
 
-register_shutdown_function("shutdown", $index_id, $process_number);
+register_shutdown_function($shutdown_function);
 
 define("CHARSET_REGEXP", "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "]/u");
 			
@@ -163,12 +163,14 @@ try
 		{
 			if ( $row["current_state"] ) 
 			{
-				# abort, because indexer is already running !  
+				# abort, because indexer is already running ! 
+				$log .= "already running\n"; 
 				die("already running\n");
 			}
 			# lastest indexing timestamp
 			else if ( $indexing_interval && (int)$row["updated"] + ($indexing_interval*60) > time() && !$user_mode && !$test_mode )  
 			{
+				$log .= "indexing interval is enabled - you are trying to index too soon\n";
 				die("indexing interval is enabled - you are trying to index too soon\n");
 			}
 			
@@ -182,6 +184,7 @@ try
 		}
 		else
 		{
+			$log .= "Incorrent index \n";
 			die("Incorrent index \n");
 		}
 		
@@ -208,6 +211,7 @@ try
 					{
 						SetIndexingState(0, $index_id);
 						SetProcessState($index_id, $process_number, 0);	
+						$log .= "delta index merging requested, but there is nothing to merge ( delta index is empty ). Quitting now...\n";
 						die("delta index merging requested, but there is nothing to merge ( delta index is empty ). Quitting now...\n");
 					}
 				}
@@ -259,6 +263,7 @@ try
 		}
 		
 		echo "Min doc_id = $min_doc_id \n";
+		$log .= "Min doc_id = $min_doc_id \n";
 	}
 	
 	if ( isset($purge_index) )
@@ -283,6 +288,7 @@ try
 		if ( is_string($ext_connection) )
 		{
 			echo "Error: establishing the external database connection failed. Following error message was received: $ext_connection\n";
+			$log .= "Error: establishing the external database connection failed. Following error message was received: $ext_connection\n";
 			return;
 		}
 	}
@@ -330,6 +336,8 @@ try
 			catch ( PDOException $e ) 
 			{
 				echo "Creating docinfo delta table failed :( \n";
+				$log .= "Creating docinfo delta table failed :( \n";
+				return;
 			}
 		}
 	}
@@ -463,10 +471,14 @@ if ( $process_number === 0 )
 		
 	}
 	catch ( PDOException $e ) 
-	{
-		
+	{	
 		echo "Something went wrong while proofing PMBDocmatches \n";
 		echo $e->getMessage();
+		
+		$log .= "Something went wrong while proofing PMBDocmatches \n";
+		$log .= $e->getMessage();
+		
+		return;
 	}
 }
 
@@ -506,8 +518,6 @@ if ( $dist_threads > 1 && $process_number === 0 )
 # make a copy of the original query because we might need it later
 $main_sql_query = str_replace(array("\n", "\r", "\t"), " ", $main_sql_query);
 
-#echo "before modifying: $main_sql_query \n\n";
-
 $original_main_sql_query = $main_sql_query;
 $main_sql_query = ModifySQLQuery($original_main_sql_query, $dist_threads, $process_number, $min_doc_id, $ranged_query_value, $write_buffer_len);
 
@@ -545,8 +555,9 @@ catch ( PDOException $e )
 		$log .= "The modified sql query: $main_sql_query \n\n";
 	}
 	$log .= $e->getMessage() . "\n";
+	
 	echo $e->getMessage();
-	#echo $log;
+
 	return;
 }
 
@@ -598,7 +609,6 @@ while ( true )
 	$fields = array();
 	$page_word_counter = array();
 	$loop_log ="";
-	$log = "";
 	++$documents;
 	++$temp_documents;
 	
@@ -1148,12 +1158,16 @@ while ( true )
 	}
 	
 	$previous_doc_id = $document_id;
+	$log = ""; # clear log after every loop
 }
 
 }
 catch ( PDOException $e ) 
 {
+	$log .= "An error occurred in the main loop: " . $e->getMessage() . "\n";
 	echo "An error occurred in the main loop: " . $e->getMessage() . "\n";
+	
+	return;
 }
 
 if ( $process_number > 0 )

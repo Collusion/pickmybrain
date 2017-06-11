@@ -29,7 +29,7 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 }
 
-register_shutdown_function("shutdown", $index_id, $process_number);
+register_shutdown_function($shutdown_function);
 
 define("CHARSET_REGEXP", "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "]/u");
 
@@ -212,6 +212,7 @@ try
 					{
 						SetIndexingState(0, $index_id);
 						SetProcessState($index_id, $process_number, 0);	
+						$log .= "delta index merging requested, but there is nothing to merge ( delta index is empty ). Quitting now...\n";
 						die("delta index merging requested, but there is nothing to merge ( delta index is empty ). Quitting now...\n");
 					}
 				}
@@ -260,6 +261,9 @@ try
 							) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql");	
 			}
 		}
+		
+		echo "Min doc_id = $min_doc_id \n";
+		$log .= "Min doc_id = $min_doc_id \n";
 	}
 	
 	if ( isset($purge_index) )
@@ -285,6 +289,7 @@ try
 		if ( is_string($ext_connection) )
 		{
 			echo "Error: establishing the external database connection failed. Following error message was received: $ext_connection\n";
+			$log .= "Error: establishing the external database connection failed. Following error message was received: $ext_connection\n";
 			return;
 		}
 	}
@@ -333,6 +338,8 @@ try
 			catch ( PDOException $e ) 
 			{
 				echo "Creating docinfo delta table failed :( \n";
+				$log .= "Creating docinfo delta table failed :( \n";
+				return;
 			}
 		}
 	}
@@ -430,6 +437,10 @@ catch ( PDOException $e )
 {
 	echo "Something went wrong when creating temporary tables: \n";
 	echo $e->getMessage() . "\n";
+	
+	$log .= "Something went wrong when creating temporary tables: \n";
+	$log .= $e->getMessage() . "\n";
+	
 	SetIndexingState(0, $index_id);
 	die();
 }
@@ -505,9 +516,13 @@ if ( $process_number === 0 )
 	}
 	catch ( PDOException $e ) 
 	{
-		
 		echo "Something went wrong while proofing PMBDocmatches \n";
 		echo $e->getMessage();
+		
+		$log .= "Something went wrong while proofing PMBDocmatches \n";
+		$log .= $e->getMessage();
+		
+		return;
 	}
 }
 
@@ -587,7 +602,7 @@ catch ( PDOException $e )
 	}
 	$log .= $e->getMessage() . "\n";
 	echo $e->getMessage();
-	#echo $log;
+
 	return;
 }
 
@@ -626,7 +641,6 @@ while ( true )
 	$fields = array();
 	$page_word_counter = array();
 	$loop_log ="";
-	$log = "";
 	++$documents;
 	++$temp_documents;
 	
@@ -1072,12 +1086,16 @@ while ( true )
 
 		return;
 	}
+	
+	$log = "";
 }
 
 }
 catch ( PDOException $e ) 
 {
+	$log .= "An error occurred in the main loop: " . $e->getMessage() . "\n";
 	echo "An error occurred in the main loop: " . $e->getMessage() . "\n";
+	return;
 }
 
 if ( $process_number > 0 )

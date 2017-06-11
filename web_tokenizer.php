@@ -1,12 +1,12 @@
 <?php
 
-/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * with this file. If not, please write to: henri.ruutinen@pickmybra.in
+ * or visit: http://www.pickmybra.in
  */
 
 ini_set('memory_limit', '1024M');
@@ -29,7 +29,7 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 }
 
-register_shutdown_function("shutdown", $index_id);
+register_shutdown_function($shutdown_function);
 
 $suffix_list = array();
 $suffix_list = get_suffix_list();
@@ -1502,10 +1502,9 @@ while ( !empty($url_list[$lp]) )
 	catch ( PDOException $e ) 
 	{
 		echo "Error when handling url $url and doc_id $document_id \n";
-		
 		var_dump($e->getMessage());
 		var_dump($loop_log);
-		$log .= $e->getMessage();
+		$log .= "Error when handling url $url and doc_id $document_id : " . $e->getMessage() . "\n";
 		if ( $test_mode ) 
 		{
 			echo $log;
@@ -1517,6 +1516,7 @@ while ( !empty($url_list[$lp]) )
 		return false;
 	}
 
+	# clear log after every pageload
 	if ( !$test_mode ) $log = "";
 }
 

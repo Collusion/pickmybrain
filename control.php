@@ -5,8 +5,8 @@
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * with this file. If not, please write to: henri.ruutinen@pickmybra.in
+ * or visit: http://www.pickmybra.in
  */
 
 ini_set("display_errors", 1);
@@ -1170,7 +1170,17 @@ try
 		{
 			$state .= ", last run: " . date("d.m.Y H:i:s", $statistic[6]);
 		}
-		$test_indexer_button = "<input type='submit' value='Test index settings' name='test_index' onClick='return confirm(\"Seed URLs will be loaded and functionality will be checked. Continue?\");' />";
+		
+		if ( $index_type == 1 )
+		{
+			$test_indexer_button = "<input type='submit' value='Test index settings' name='test_index' onClick='return confirm(\"Seed URLs will be loaded and functionality will be checked. Continue?\");' />";
+		}
+		else
+		{
+			$test_indexer_button = "<input type='submit' value='Test index settings' name='test_index' onClick='return confirm(\"Main SQL query will be tested and functionality will be checked. Continue?\");' />";
+		}
+		
+		
 		$run_indexer_button = "<input type='submit' value='Run indexer' name='run_indexer' onClick='return confirm(\"Indexer will be started now, disregarding the indexing interval. Continue?\");' />";
 		#$rebuild_dictionary = "<input type='submit' value='Rebuild prefixes' name='rebuild_prefixes' onClick='return confirm(\"Prefix-dictionary will be rebuild. This if necessary only if pre-existing search index&#39;s prefix-setting are modified. Continue?\");' />";
 	}
