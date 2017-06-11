@@ -2006,6 +2006,8 @@ function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_do
 	# alter the SQL query here if multiprocessing is turned on OR min_doc_id is greater than zero! 
 	if ( $dist_threads > 1 || $min_doc_id > 0 ) 
 	{
+		$main_sql_query = trim(str_replace(array("\n\t", "\t\n", "\r\n", "\n"), " ", $main_sql_query));
+
 		$parts = explode(" ", $main_sql_query);
 		$temp = array();
 		foreach ( $parts as $part ) 
@@ -2025,7 +2027,7 @@ function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_do
 		$catches = array("where", "group by", "having", "order by", "limit");
 		
 		/* NOTICE: IF LIMIT IS PRESENT, THE LIMIT MUST BE UPDATED LIMIT = LIMIT / DIST_THREADS */
-		
+
 		foreach ( $catches as $catch ) 
 		{
 			# find the last occurance of the needle
@@ -2047,7 +2049,7 @@ function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_do
 				}
 			}
 		}
-		
+
 		$mod_value = $dist_threads * $write_buffer_len;
 		$mod_result_min = $write_buffer_len * $process_number;
 		$mod_result_max = $mod_result_min + $write_buffer_len;
