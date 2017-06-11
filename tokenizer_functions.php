@@ -496,6 +496,26 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 	}
 	else
 	{
+		
+		# check that columns have been defined one-by-one, not by SELECT * FROM ...
+		$main_sql_query = trim(str_replace(array("\n\t", "\t\n", "\r\n", "\n", "\t", "\r"), " ", $main_sql_query));
+		$parts = explode(" ", $main_sql_query);
+		$temp = array();
+		foreach ( $parts as $part ) 
+		{
+			if ( $part != "" )
+			{
+				$temp[] = $part;
+			}
+		}
+		$main_sql_query = implode(" ", $temp);
+		
+		if ( stripos($main_sql_query, "SELECT * FROM") !== false )
+		{
+			$log .= "Error: data columns must be defined separately, SELECT * FROM ... does not work.\n";
+			++$e_count;
+		}
+		
 		$lastpos = mb_strripos(str_replace("\n", " ", $main_sql_query), " limit ");
 		
 		if ( $lastpos !== false ) 
@@ -507,6 +527,7 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 			$main_sql_query .= " LIMIT 5";
 		}
 		
+		# compare query againts defined attributes
 		if ( !empty($main_sql_attrs) && !empty($main_sql_attrs[0]) )
 		{	
 			# create reversed attribute list
@@ -2006,7 +2027,7 @@ function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_do
 	# alter the SQL query here if multiprocessing is turned on OR min_doc_id is greater than zero! 
 	if ( $dist_threads > 1 || $min_doc_id > 0 ) 
 	{
-		$main_sql_query = trim(str_replace(array("\n\t", "\t\n", "\r\n", "\n"), " ", $main_sql_query));
+		$main_sql_query = trim(str_replace(array("\n\t", "\t\n", "\r\n", "\n", "\t", "\r"), " ", $main_sql_query));
 
 		$parts = explode(" ", $main_sql_query);
 		$temp = array();
