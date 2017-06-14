@@ -60,6 +60,7 @@ $quality_scoring	= 1;
 $forgive_keywords	= 1;
 $expansion_limit 	= 32;
 $log_queries	 	= 0;
+$include_original_data = 0;
 
 # general settings
 $data_columns		= array();

@@ -42,27 +42,28 @@ if ( $data = parse_ini_file($filepath) )
 		$use_buffered_queries	= +$use_buffered_queries;
 		$ranged_query_value		= +$ranged_query_value;
 		$html_strip_tags		= +$html_strip_tags;
+		$include_original_data 	= +$include_original_data;
 	}
 	
 	# general variables
-	$indexing_interval 	= +$indexing_interval;
-	$update_interval 	= +$update_interval;
-	$sentiment_analysis = +$sentiment_analysis;
-	$prefix_mode 		= +$prefix_mode;
-	$prefix_length 		= +$prefix_length;
-	$dialect_processing = +$dialect_processing;
-	$separate_alnum 	= +$separate_alnum;
-	$sentiweight 		= +$sentiweight;
-	$keyword_stemming 	= +$keyword_stemming;
-	$dialect_matching 	= +$dialect_matching;
-	$quality_scoring 	= +$quality_scoring;
-	$expansion_limit 	= +$expansion_limit;
-	$log_queries 		= +$log_queries;
-	$dist_threads 		= +$dist_threads;
-	$innodb_row_format 	= +$innodb_row_format;
-	$enable_exec 		= +$enable_exec;
-	$number_of_fields 	= +$number_of_fields;
-	$index_type 		= +$index_type;
+	$indexing_interval 		= +$indexing_interval;
+	$update_interval 		= +$update_interval;
+	$sentiment_analysis 	= +$sentiment_analysis;
+	$prefix_mode 			= +$prefix_mode;
+	$prefix_length 			= +$prefix_length;
+	$dialect_processing 	= +$dialect_processing;
+	$separate_alnum 		= +$separate_alnum;
+	$sentiweight 			= +$sentiweight;
+	$keyword_stemming 		= +$keyword_stemming;
+	$dialect_matching 		= +$dialect_matching;
+	$quality_scoring 		= +$quality_scoring;
+	$expansion_limit 		= +$expansion_limit;
+	$log_queries 			= +$log_queries;
+	$dist_threads 			= +$dist_threads;
+	$innodb_row_format 		= +$innodb_row_format;
+	$enable_exec 			= +$enable_exec;
+	$number_of_fields 		= +$number_of_fields;
+	$index_type 			= +$index_type;
 }
 else
 {

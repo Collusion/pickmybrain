@@ -88,25 +88,32 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 		
 		echo "<div class='result_container'>$pagenumber" . $result["total_matches"]." results ( ".round(ceil($result["query_time"]*1000)/1000, 3)." seconds )</div>";
 
+		$hidden_data = "";
+		$hidden_title = "";
+		$hidden_onclick = "";
+		foreach ( $result["matches"] as $doc_id => $row ) 
+		{
+			foreach ( $row as $column => $col_val ) 
+			{
+				if ( $col_val == $doc_id ) 
+				{
+					$hidden_data = "hidden_data";
+					$hidden_title = "title='Click to expand'";
+					$hidden_onclick = "onclick='ExpandResult(this);'";
+					break;
+				}
+			}
+		}
+
 		# this index contains time statistics 
 		#print_r($result["stats"]); 
 
 		foreach ( $result["matches"] as $doc_id => $row ) 
 		{
-			if ( !isset($row["title"]) )
-			{
-				echo "<div class='result_container'>
-						<div class='result_title'>document_id: $doc_id</div>";
-						
-						foreach ( $row as $column => $col_val ) 
-						{
-							echo "<div class='result_text'>$column => $col_val</div>";
-						}
-						
-						echo "</div>";
-			}
-			else
+			if ( isset($row["title"]) && isset($row["URL"]) )
 			{	
+				/* web-index */
+			
 				# shorten title if necessary
 				if ( mb_strlen($row["title"]) > 94 ) 
 				{
@@ -122,6 +129,41 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 					  </div>
 						";
 			}
+			else
+			{
+				$extra_fields = "";
+				/* database index */
+				echo "<div class='result_container $hidden_data' $hidden_title $hidden_onclick>
+						<div class='result_title '>document_id: $doc_id</div>";
+						
+						foreach ( $row as $column => $col_val ) 
+						{
+							if ( $col_val == $doc_id ) 
+							{
+								$extra_fields .= "<div style='display:none;' name='hiddencontent'>";
+							}
+							
+							$col_val = strip_tags($col_val);
+							if ( mb_strlen($col_val) > 94 )
+							{
+								$col_val = $pickmybrain->SearchFocuser($col_val, $_GET["q"]);
+								# content needs to be focused
+								$extra_fields .= "<div class='result_text'>$column => $col_val</div>";
+							}
+							else
+							{
+								$extra_fields .= "<div class='result_text'>$column => $col_val</div>";
+							}
+						}
+						
+						if ( !empty($extra_fields) )
+						{
+							echo "$extra_fields </div>";
+						}
+						
+						echo "</div>";
+			}
+		
 		}
 
 		# print pagelist if necessary

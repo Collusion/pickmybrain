@@ -1,12 +1,12 @@
 <?php
 
-/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@pickmybra.in
- * or visit: http://www.pickmybra.in
+ * with this file. If not, please write to: henri.ruutinen@gmail.com
+ * or visit: http://www.hollilla.com/pickmybrain
  */
  
 class PackedIntegers
@@ -1018,6 +1018,7 @@ function write_settings(array $settings, $index_id = 0)
 			case 'allow_subdomains':
 			case 'index_pdfs':
 			case 'delta_indexing':
+			case 'include_original_data':
 			if ( isset($setting_value) && $setting_value <= 1 && $setting_value >= 0 )
 			{
 				$$setting_name = $setting_value;
@@ -1336,6 +1337,7 @@ use_buffered_queries 		= $use_buffered_queries
 ranged_query_value		= $ranged_query_value
 html_strip_tags			= $html_strip_tags
 html_remove_elements		= \"$html_remove_elements\"
+include_original_data	= $include_original_data
 ".ini_array_value_export("html_index_attrs", $html_index_attrs)."";
 
 	}
@@ -2028,6 +2030,7 @@ function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_do
 	if ( $dist_threads > 1 || $min_doc_id > 0 ) 
 	{
 		$main_sql_query = trim(str_replace(array("\n\t", "\t\n", "\r\n", "\n", "\t", "\r"), " ", $main_sql_query));
+		$main_sql_query = str_replace(",", ", ", $main_sql_query);
 
 		$parts = explode(" ", $main_sql_query);
 		$temp = array();
@@ -2078,9 +2081,7 @@ function ModifySQLQuery($main_sql_query, $dist_threads, $process_number, $min_do
 		$primary_column  =  trim($temp[1], " \t\n\r\0\x0B,");
 		if ( $dist_threads > 1 ) 
 		{
-			#$main_sql_query  = $first_part . $where_cond . $prefix . "$primary_column % $dist_threads = $process_number ";
 			$main_sql_query  = $first_part . $where_cond . $prefix . "$primary_column % $mod_value >= $mod_result_min AND $primary_column % $mod_value < $mod_result_max";
-			#$main_sql_query  = $first_part . $where_cond  ;
 			if ( $min_doc_id > 0 ) $main_sql_query .= " AND $primary_column >= $min_doc_id";
 		}
 		else # min_doc_id > 0 

@@ -83,6 +83,7 @@ class PickMyBrain
 	private $main_sql_attrs;
 	private $max_results;
 	private $sentiment_analysis;
+	private $include_original_data;
 	
 	/* Internal */
 	private $allowed_sort_modes;
@@ -98,6 +99,8 @@ class PickMyBrain
 	private $temp_matches;
 	private $temp_sentiscores;
 	private $disabled_documents;
+	private $sql_body;
+	private $primary_key;
 		
 	public function __construct($index_name = "")
 	{
@@ -191,6 +194,11 @@ class PickMyBrain
 		{
 			$this->main_sql_attrs	= $main_sql_attrs;
 		}
+		
+		if ( isset($include_original_data) )
+		{
+			$this->include_original_data = $include_original_data;
+		}
 
 		if ( $dialect_matching ) 
 		{
@@ -206,6 +214,16 @@ class PickMyBrain
 			{
 				$this->field_weights[$fi] = (int)$field_weight;
 			}
+		}
+		
+		if ( !empty($main_sql_query) ) 
+		{
+			$this->sql_body = $this->RewriteMainSQL($main_sql_query);
+		}
+		else
+		{
+			$this->sql_body = array();
+			$this->primary_key = "";
 		}
 
 		return true;
@@ -309,6 +327,18 @@ class PickMyBrain
 		}
 		
 		return $prefix_array;	
+	}
+	
+	public function IncludeOriginalData($value)
+	{
+		if ( !empty($value) )
+		{
+			$this->include_original_data = true;
+		}
+		else
+		{
+			$this->include_original_data = false;
+		}
 	}
 	
 	public function SetLogState($value)
@@ -2010,13 +2040,11 @@ class PickMyBrain
 						{
 							if ( !empty($loop_doc_positions[$doc_id]) ) 
 							{
-								$loop_doc_positions[$doc_id] 	.= $bin_sep.$data[$l];
-								$loop_doc_groups[$doc_id]		.= $encoded_group;
+								$loop_doc_positions[$doc_id] 	.= $bin_sep.$encoded_group.$data[$l];
 							}
 							else
 							{
-								$loop_doc_positions[$doc_id] 	= $data[$l];
-								$loop_doc_groups[$doc_id]		= $encoded_group;
+								$loop_doc_positions[$doc_id] 	= $encoded_group.$data[$l];
 							}
 							++$l;
 						}
@@ -2084,7 +2112,6 @@ class PickMyBrain
 							}
 
 							$match_position_string = &$loop_doc_positions[$doc_id];
-							$match_position_groups = &$loop_doc_groups[$doc_id];
 							# now calculate document scores
 							if ( $exact_mode ) 
 							{
@@ -2101,9 +2128,8 @@ class PickMyBrain
 							$sentiscore			= 0;
 							$position_storage 	= $last_pos_lookup;	
 							$exact_match 		= false;
-							$group_count		= 0;
 						
-							$t_group 	= $this->hex_lookup_decode[$match_position_groups[0]];
+							$t_group 	= $this->hex_lookup_decode[$match_position_string[0]];
 							$qind		= $sorted_groups[$t_group];
 							$prev_group = $qind-1;	
 
@@ -2117,7 +2143,7 @@ class PickMyBrain
 							$delta = 1;
 							$x = 0;
 								
-							for ( $i = 0 ; $i < $data_len ; ++$i )
+							for ( $i = 1 ; $i < $data_len ; ++$i )
 							{
 								$bits = $this->hex_lookup_decode[$match_position_string[$i]];
 								
@@ -2128,9 +2154,9 @@ class PickMyBrain
 									
 									# zero, as in binary separator
 									# token changes
-									# reset temporary variables
-									++$group_count;
-									$t_group 	= $this->hex_lookup_decode[$match_position_groups[$group_count]];
+									
+									++$i; # first char will be the group
+									$t_group 	= $this->hex_lookup_decode[$match_position_string[$i]];
 									$qind		= $sorted_groups[$t_group];
 									$prev_group = $qind-1;
 									
@@ -2148,6 +2174,7 @@ class PickMyBrain
 										$best_match_score[$qind] 	= $score_lookup_alt[$t_group];
 									}
 											
+									# reset temporary variables		
 									$temp = 0;
 									$shift = 0;
 									$delta = 1;
@@ -3042,6 +3069,24 @@ class PickMyBrain
 				
 				$this->result["stats"]["ext_docinfo_time"] = microtime(true)-$ext_docinfo_start;
 			}
+			# if user has requested that original  data must be included with the results
+			else if ( $this->include_original_data && !empty($this->sql_body) ) 
+			{
+				try
+				{
+					$external_data_sql = $this->sql_body[0] . implode(",", array_keys($this->result["matches"])) . $this->sql_body[1];
+					$ext_pdo = $this->db_connection->query($external_data_sql);
+					
+					while ( $row = $ext_pdo->fetch(PDO::FETCH_ASSOC) )
+					{
+						$this->result["matches"][(int)$row[$this->primary_key]] += $row;
+					}
+				}
+				catch ( PDOException $e ) 
+				{
+					$this->result["error"] = "Including original data failed. Following error message was received: " . $e->getMessage();
+				}
+			}
 		}
 		catch ( PDOException $e ) 
 		{
@@ -3073,6 +3118,96 @@ class PickMyBrain
 				echo $e->getMessage();
 			}
 		}
+	}
+	
+	private function RewriteMainSQL($main_sql_query)
+	{
+		$main_sql_query = trim(str_replace(array("\n\t", "\t\n", "\r\n", "\n"), " ", $main_sql_query));
+		$main_sql_query = str_replace(",", ", ", $main_sql_query);
+
+		$parts = explode(" ", $main_sql_query);
+		$temp = array();
+		foreach ( $parts as $part ) 
+		{
+			if ( $part != "" )
+			{
+				$temp[] = $part;
+			}
+		}
+		
+		$trimmed_sql = implode(" ", $temp);
+		$primary_column  =  trim($temp[1], " \t\n\r\0\x0B,");
+		$pre_existing_where = false;
+		$secondary_breakpoint = false;
+		
+		# primary column name
+		$primary_parts = explode(".", $primary_column);
+		$this->primary_key = end($primary_parts);
+	
+		# the custom where attribute comes before groupby, having etc..
+		$catches = array("where", "group by", "having", "order by", "limit");
+	
+		foreach ( $catches as $catch ) 
+		{
+			# find the last occurance of the needle
+			$pos = strripos($trimmed_sql, " " . $catch );
+				
+			if ( $pos !== false ) 
+			{
+				if ( $catch === "where" ) 
+				{
+					$pre_existing_where = $pos;
+				}
+				else
+				{
+					$secondary_breakpoint = $pos;
+					break;
+				}
+			}
+		}
+		
+		if ( $pre_existing_where )
+		{
+			# the sql query includes a where condition
+			# it needs to be cut out ! 
+			$before_where = substr($trimmed_sql, 0, $pre_existing_where);
+			
+			# query includes a secondary breakpoint
+			if ( $secondary_breakpoint ) 
+			{
+				$from_secondary = substr($trimmed_sql, $secondary_breakpoint);
+				
+				# the original where-condition gets replaced
+				$final_sql[0] = $before_where . " WHERE $primary_column IN(";
+				$final_sql[1] = ") $from_secondary";
+			}
+			else
+			{
+				$final_sql[0] = $before_where . " WHERE $primary_column IN(";	
+				$final_sql[1] = ")";
+			}
+		}
+		else
+		{ 
+			# no where condition in the sql
+			if ( $secondary_breakpoint ) 
+			{
+				# put the where condition before secondary breakpoint
+				$before_secondary = substr($trimmed_sql, 0, $secondary_breakpoint);
+				$from_secondary = substr($trimmed_sql, $secondary_breakpoint);
+				
+				$final_sql[0] = $before_secondary . " WHERE $primary_column IN(";
+				$final_sql[1] = ") $from_secondary";
+			}
+			else
+			{
+				# just append the where condition
+				$final_sql[0] = $trimmed_sql . " WHERE $primary_column IN(";
+				$final_sql[1] = ")";
+			}
+		}
+
+		return $final_sql;
 	}
 	
 	public function SetFieldWeights($input = array())

@@ -5,8 +5,8 @@
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@pickmybra.in
- * or visit: http://www.pickmybra.in
+ * with this file. If not, please write to: henri.ruutinen@gmail.com
+ * or visit: http://www.hollilla.com/pickmybrain
  */
 
 ini_set("display_errors", 1);
@@ -1414,6 +1414,16 @@ else
 	$log_queries_0 = "checked";
 }
 
+$include_original_data_0 = $include_original_data_1 = "";
+if ( !empty($include_original_data) )
+{
+	$include_original_data_1 = "checked";
+}
+else
+{
+	$include_original_data_0 = "checked";
+}
+
 $use_internal_db_0 = $use_internal_db_1 = "";
 if ( !empty($use_internal_db) )
 {
@@ -1963,6 +1973,19 @@ switch ( $innodb_row_format )
         Smaller value: less results, faster
     </p>
     <p><input name='expansion_limit' type='text' value='<?php echo $expansion_limit; ?>' style="width:60px;" /></p>
+</div>
+
+<div class='settingsbox' <?php echo $db_visibility; ?>>
+	<h3>Include original data</h3>
+    <p>
+    	This setting chooses, whether original indexed data is presented with the search results from PMBApi.
+    </p>
+     <p>
+   		<input type="radio" name="include_original_data" value="0" <?php echo $include_original_data_0; ?> /> Disabled
+        <br />
+        <input type="radio" name="include_original_data" value="1" <?php echo $include_original_data_1; ?> /> Enabled
+        <br />
+    </p>
 </div>
 
 <div class='settingsbox'>

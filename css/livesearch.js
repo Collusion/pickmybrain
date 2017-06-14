@@ -4,8 +4,6 @@ function searchOptions(buttonName) {
 		var elem = document.getElementById(buttonName);
 		var button = document.getElementsByName(buttonName)[0];
 		
-		
-		
 		if ( elem.offsetParent === null )
 		{
 			document.getElementById("sort").style.display = 'none';
@@ -101,6 +99,30 @@ function pmbsearch(str, e, offset) {
 
 	}, 250);
 
+}
+
+function ExpandResult(elem) {
+	
+	 var hidden_elem = elem.lastChild;
+	
+	 if ( hidden_elem.offsetParent === null )
+	 {
+		  var elements = document.getElementsByName('hiddencontent');
+		  for (var i = 0; i < elements.length; i++)
+		 {
+			elements[i].style.display = 'none';
+		 }
+		 
+		 // element not visible
+		 hidden_elem.style.display = 'inline-block';
+		 hidden_elem.title = 'Click to shrink';
+	 }
+	 else
+	 {
+		 // element visible
+		 hidden_elem.style.display = 'none';
+		 hidden_elem.title = 'Click to expand';
+	 }
 }
 
 function TogglePMBSearch() {
