@@ -84,6 +84,7 @@ class PickMyBrain
 	private $max_results;
 	private $sentiment_analysis;
 	private $include_original_data;
+	private $use_internal_db;
 	
 	/* Internal */
 	private $allowed_sort_modes;
@@ -189,6 +190,11 @@ class PickMyBrain
 		$this->sentiment_index		= ($sentiment_analysis) ? 1 : 0 ;
 		$this->data_columns			= $data_columns;
 		$this->field_weights 		= $field_weights;
+		
+		if ( isset($use_internal_db) )
+		{
+			$this->use_internal_db	= $use_internal_db;
+		}
 		
 		if ( isset($main_sql_attrs) )
 		{
@@ -3072,19 +3078,61 @@ class PickMyBrain
 			# if user has requested that original  data must be included with the results
 			else if ( $this->include_original_data && !empty($this->sql_body) ) 
 			{
-				try
+				if ( $this->use_internal_db === 0 ) 
 				{
-					$external_data_sql = $this->sql_body[0] . implode(",", array_keys($this->result["matches"])) . $this->sql_body[1];
-					$ext_pdo = $this->db_connection->query($external_data_sql);
-					
-					while ( $row = $ext_pdo->fetch(PDO::FETCH_ASSOC) )
+					# we are using an external database! 
+					include_once "ext_db_connection_".$this->index_id.".php"; 
+		
+					# create a new instance of the connection
+					if ( function_exists("ext_db_connection") )
 					{
-						$this->result["matches"][(int)$row[$this->primary_key]] += $row;
+						$ext_connection = call_user_func("ext_db_connection");
+						if ( is_string($ext_connection) )
+						{
+							$this->result["error"] = "Including original data failed. Following error message was received: ext_connection" ;
+						}
+						else
+						{
+							# everything seems to be OK!
+							try
+							{
+								$external_data_sql = $this->sql_body[0] . implode(",", array_keys($this->result["matches"])) . $this->sql_body[1];
+								$ext_pdo = $ext_connection->query($external_data_sql);
+								
+								while ( $row = $ext_pdo->fetch(PDO::FETCH_ASSOC) )
+								{
+									$this->result["matches"][(int)$row[$this->primary_key]] += $row;
+								}
+							}
+							catch ( PDOException $e ) 
+							{
+								$this->result["error"] = "Including original data failed. Following error message was received: " . $e->getMessage();
+							}	
+						}
 					}
+					else
+					{
+						# no such connection defined
+						$this->result["error"] = "Including original data failed. External data base not defined or defined incorrectly." ;
+					}	
 				}
-				catch ( PDOException $e ) 
+				else
 				{
-					$this->result["error"] = "Including original data failed. Following error message was received: " . $e->getMessage();
+					# we are using internal database
+					try
+					{
+						$external_data_sql = $this->sql_body[0] . implode(",", array_keys($this->result["matches"])) . $this->sql_body[1];
+						$ext_pdo = $this->db_connection->query($external_data_sql);
+						
+						while ( $row = $ext_pdo->fetch(PDO::FETCH_ASSOC) )
+						{
+							$this->result["matches"][(int)$row[$this->primary_key]] += $row;
+						}
+					}
+					catch ( PDOException $e ) 
+					{
+						$this->result["error"] = "Including original data failed. Following error message was received: " . $e->getMessage();
+					}
 				}
 			}
 		}
