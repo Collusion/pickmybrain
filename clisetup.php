@@ -1,12 +1,12 @@
 <?php
 
-/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * with this file. If not, please write to: henri.ruutinen@pickmybra.in
+ * or visit: http://www.pickmybra.in
  */
 
 require_once("tokenizer_functions.php");
@@ -18,6 +18,22 @@ if ( is_string($connection) )
 	echo "Could not establish database connection.\n";
 	echo "Please review your settings in db_connection.php\n";
 	echo "Additionally, a following error message was received:\n$connection \n";
+	return;
+}
+
+# check that runtime environment is 64bir
+if ( PHP_INT_SIZE !== 8 )
+{
+	echo "Pickmybrain requires a 64-bit PHP runtime environment.\n";
+	echo "Please update your PHP to continue.\n";
+	return;
+}
+
+# check php version
+if ( version_compare(PHP_VERSION, '5.3.0') < 0) 
+{
+    echo "PHP version >= 5.3.0 required, " . PHP_VERSION . " detected.\n";
+	echo "Please update your PHP to continue.\n";
 	return;
 }
 

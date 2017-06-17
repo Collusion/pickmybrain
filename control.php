@@ -221,6 +221,29 @@ if ( !extension_loaded("mbstring") )
 }
 
 # 6. check that curl extension is loaded
+if ( PHP_INT_SIZE !== 8 )
+{
+	++$errors;
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: 64-bit PHP required</h3>
+		  	<p>Pickmybrain requires a 64-bit PHP runtime environment. Please update your PHP to continue.</p>
+		  </div>";
+}
+
+# check php version
+
+if ( version_compare(PHP_VERSION, '5.3.0') < 0) 
+{
+    ++$errors;
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: PHP version >= 5.3.0 required</h3>
+		  	<p>Pickmybrain requires a newer PHP runtime environment. Required version: 5.3.0, version installed: " . PHP_VERSION . "</p>
+		  </div>";
+}
+
+# 6. check that curl extension is loaded
 if ( !extension_loaded("curl") )
 {
 	++$errors;
@@ -494,7 +517,7 @@ else if ( !empty($_GET["action"]) && $_GET["action"] === "uninstallpmb" )
 		$connection->query("DROP TABLE PMBIndexes");
 		$_SESSION = array();
 		session_destroy();
-		header("Location: http://www.pickmybra.in");
+		header("Location: http://www.hollilla.com/pickmybrain");
 		return;
 	}
 	catch ( PDOException $e ) 
@@ -590,7 +613,6 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			# run the indexer in test mode
 			$testpdo = $connection->prepare("UPDATE PMBIndexes SET indexing_permission = 1 WHERE ID = ?");
 			$testpdo->execute(array($index_id));
-
 			
 			if ( $enable_exec ) 
 			{
@@ -601,7 +623,6 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			else
 			{
 				$url_to_exec = "http://localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=testmode&index_id=$index_id";
-				#echo "URL TO EXEC $url_to_exec <br>";
 				
 				echo "<div style='float:left;clear:both;display:inline-block;'><textarea rows='35' cols='100'>";
 				execWithCurl($url_to_exec, false);
@@ -665,6 +686,9 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 									DROP TABLE IF EXISTS PMBTokens".$index_suffix."_delta;
 									DROP TABLE IF EXISTS PMBPrefixes".$index_suffix."_delta;
 									DROP TABLE IF EXISTS PMBDocinfo".$index_suffix."_delta;
+									DROP TABLE IF EXISTS PMBTokens".$index_suffix."_temp;
+									DROP TABLE IF EXISTS PMBPrefixes".$index_suffix."_temp;
+									DROP TABLE IF EXISTS PMBDocinfo".$index_suffix."_temp;
 									SET FOREIGN_KEY_CHECKS=1;");
 									
 				$connection->query("UPDATE PMBCategories$index_suffix SET count = 0");
@@ -688,7 +712,9 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			}
 			catch ( PDOException $e ) 
 			{
+				echo $e->getMessage();
 				$connection->rollBack();
+				die();
 			}
 		}
 		else if ( !empty($_POST["delete_index"]) ) 
@@ -733,7 +759,7 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 	if ( $redirect === 1 )
 	{
 		header("Location: control.php?index_id=$index_id");
-		return;
+		die();
 	}
 	# redirect to control panel
 	else if ( $redirect === 2 ) 
@@ -1864,7 +1890,6 @@ switch ( $innodb_row_format )
         <p>Searching with query <b>Sony 705</b> would not yield any results with this feature disabled. However, this feature enabled the query would return results.</p>
     </div>
 </div>
-
 
 <p style='display:inline-block;float:left;clear:both;'>
 	<h2 style='width:100%;'>Default search (runtime) settings</h2>

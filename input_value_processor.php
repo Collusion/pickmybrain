@@ -1,12 +1,12 @@
 <?php
 
-/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * with this file. If not, please write to: henri.ruutinen@pickmybra.in
+ * or visit: http://www.pickmybra.in
  */
 
 if( !defined('SPL_EXISTS') )
@@ -47,18 +47,35 @@ if ( !empty($_GET) )
 	# database connection
 	require_once("db_connection.php");
 	
-	if ( !empty($_GET["mode"]) && $_GET["mode"] === "usermode" && $_SERVER["REMOTE_ADDR"] === "127.0.0.1" ) 
+	$allowed_local_addresses = array("127.0.0.1" => 1,
+									 "127.0.1.1" => 1);
+
+	if ( !empty($_GET["mode"]) )
 	{
-		$user_mode = true;
-	}
-	else if ( !empty($_GET["mode"]) && $_GET["mode"] === "testmode" && $_SERVER["REMOTE_ADDR"] === "127.0.0.1" ) 
-	{
-		$test_mode = true;
-	}
-	else if ( !empty($_GET["mode"]) && $_GET["mode"] === "rebuildprefixes" && $_SERVER["REMOTE_ADDR"] === "127.0.0.1" ) 
-	{
-		rebuild_prefixes($prefix_mode, $prefix_length, $dialect_replacing, $index_suffix);
-		return;
+		# we need session for this !
+		session_start();
+		
+		if ( !empty($_SESSION["pmb_logged_in"]) )
+		{
+			if ( $_GET["mode"] === "usermode" ) 
+			{
+				$user_mode = true;
+			}
+			else if ( $_GET["mode"] === "testmode") 
+			{
+				$test_mode = true;
+			}
+			else if ( $_GET["mode"] === "rebuildprefixes" ) 
+			{
+				rebuild_prefixes($prefix_mode, $prefix_length, $dialect_replacing, $index_suffix);
+				return;
+			}
+		}
+		else
+		{
+			echo "This operation requires administrator privileges\n";
+			return;
+		}
 	}
 
 	# launch multiple processes ?

@@ -371,25 +371,21 @@ class PickMyBrain
 		}
 	}
 	
-	private function execWithCurl($url, $async = true)
+	private function execWithCurl($url)
 	{
+		$url = str_replace("localhost", $_SERVER['SERVER_NAME'], $url);
 		$timeout = 1;
-		if ( empty($async) )
-		{
-			$async 		= false;
-			$timeout 	= 10000;
-		}
-		
+
 		$options = array(
-			CURLOPT_RETURNTRANSFER 	=> false,    
-			CURLOPT_HEADER         	=> false,   
-			CURLOPT_FOLLOWLOCATION 	=> true,    
-			CURLOPT_ENCODING       	=> "",      
-			CURLOPT_USERAGENT      	=> "localhost",   
-			CURLOPT_AUTOREFERER    	=> true,     
-			CURLOPT_CONNECTTIMEOUT 	=> 10,      
-			CURLOPT_TIMEOUT_MS 		=> $timeout,      
-			CURLOPT_FRESH_CONNECT 	=> $async
+			CURLOPT_RETURNTRANSFER 	=> true,     // return web page as string
+			CURLOPT_HEADER         	=> false,    // don't return headers
+			CURLOPT_FOLLOWLOCATION 	=> true,     // follow redirects
+			CURLOPT_ENCODING       	=> "",       // handle all encodings
+			CURLOPT_USERAGENT      	=> "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36",    // who am i
+			CURLOPT_AUTOREFERER    	=> true,     // set referer on redirect
+			CURLOPT_CONNECTTIMEOUT 	=> 10,      // timeout on connect
+			CURLOPT_TIMEOUT        	=> $timeout,      // timeout on response
+			CURLOPT_FRESH_CONNECT 	=> true		// this is always asynchronous
 		);
 	
 		$ch      = curl_init($url);
@@ -1016,7 +1012,7 @@ class PickMyBrain
 		{
 			return $this->result;
 		}
-		
+
 		$token_array = array_count_values(explode(" ", $query));
 		unset($token_array[""]);
 		$token_sql = array();
@@ -1242,7 +1238,7 @@ class PickMyBrain
 				{
 					$this->expansion_limit = 255 - $tc;
 				}
-				
+
 				$prefix_time_start = microtime(true);
 				$prefix_grouper = array();
 				$prefix_data = array();

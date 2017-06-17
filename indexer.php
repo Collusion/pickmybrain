@@ -1,20 +1,27 @@
 <?php
 
-/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
- * You may use, distribute and modify this code under the
- * terms of the GNU GPLv3 license
- *
- * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
- */
-
 define("MAX_TOKEN_LEN", 40);
 ini_set("display_errors", 1);
 error_reporting(E_ALL);
 mb_internal_encoding("UTF-8");
 set_time_limit(0);
 ignore_user_abort(true); 
+
+# check that runtime environment is 64bir
+if ( PHP_INT_SIZE !== 8 )
+{
+	echo "Pickmybrain requires a 64-bit PHP runtime environment.\n";
+	echo "Please update your PHP to continue.\n";
+	return;
+}
+
+# check php version
+if ( version_compare(PHP_VERSION, '5.3.0') < 0) 
+{
+    echo "PHP version >= 5.3.0 required, " . PHP_VERSION . " detected.\n";
+	echo "Please update your PHP to continue.\n";
+	return;
+}
 
 $log = "";
 $test_mode 		= false;

@@ -517,7 +517,7 @@ while ( !empty($url_list[$lp]) )
 	unset($url_list[$lp-1]);
 	
 	$log .= "processing: $url \n";
-	
+
 	if ( empty($url) )
 	{
 		$log .= "INVALID URL: $url \n";
@@ -533,7 +533,7 @@ while ( !empty($url_list[$lp]) )
 	{
 		$complete_url = $url;
 	}
-	
+
 	# pdf file ! 
 	if ( stripos($complete_url, ".pdf") !== false ) 
 	{

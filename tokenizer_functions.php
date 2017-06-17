@@ -372,6 +372,8 @@ function deleteIndex($index_id)
 
 function execWithCurl($url, $async = true)
 {
+	$url = str_replace("localhost", $_SERVER['SERVER_NAME'], $url);
+
 	$timeout = 1;
 	if ( empty($async) )
 	{
@@ -379,22 +381,45 @@ function execWithCurl($url, $async = true)
 		$timeout 	= 10;
 	}
 	
+	# maintain session through curl request
+	if ( !empty($_SESSION["pmb_logged_in"]) && $async === false )
+	{
+		$useragent = $_SERVER['HTTP_USER_AGENT'];
+		$strCookie = 'PHPSESSID=' . $_COOKIE['PHPSESSID'] . '; path=/';
+		session_write_close();
+	}
+	else
+	{
+		$useragent = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36";
+	}
+	
 	$options = array(
-        CURLOPT_RETURNTRANSFER 	=> false,     // return web page
+        CURLOPT_RETURNTRANSFER 	=> false,     // do not return web page
         CURLOPT_HEADER         	=> false,    // don't return headers
         CURLOPT_FOLLOWLOCATION 	=> true,     // follow redirects
         CURLOPT_ENCODING       	=> "",       // handle all encodings
-        CURLOPT_USERAGENT      	=> "localhost",    // who am i
+        CURLOPT_USERAGENT      	=> $useragent,    // who am i
         CURLOPT_AUTOREFERER    	=> true,     // set referer on redirect
         CURLOPT_CONNECTTIMEOUT 	=> 10,      // timeout on connect
-        CURLOPT_TIMEOUT        	=> $timeout,      // timeout on response
+        CURLOPT_TIMEOUT      	=> $timeout,      // timeout on response
 		CURLOPT_FRESH_CONNECT 	=> $async
     );
+	
+	# maintain session through curl request
+	if ( !empty($_SESSION["pmb_logged_in"]) && $async === false )
+	{
+		$options += array(CURLOPT_COOKIE => $strCookie);
+	}
 
     $ch      = curl_init($url);
     curl_setopt_array( $ch, $options );
     $content = curl_exec( $ch );
     curl_close( $ch );
+	
+	if ( empty($async) )
+	{
+		echo $content;
+	}
 	
 	return $content;
 }

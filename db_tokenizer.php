@@ -262,7 +262,6 @@ try
 			}
 		}
 		
-		echo "Min doc_id = $min_doc_id \n";
 		$log .= "Min doc_id = $min_doc_id \n";
 	}
 	
