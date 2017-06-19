@@ -220,7 +220,7 @@ if ( !extension_loaded("mbstring") )
 		  </div>";
 }
 
-# 6. check that curl extension is loaded
+# check php version ( x64 ) 
 if ( PHP_INT_SIZE !== 8 )
 {
 	++$errors;
@@ -232,7 +232,6 @@ if ( PHP_INT_SIZE !== 8 )
 }
 
 # check php version
-
 if ( version_compare(PHP_VERSION, '5.3.0') < 0) 
 {
     ++$errors;
@@ -1888,6 +1887,27 @@ switch ( $innodb_row_format )
         Example: input <b>Sony KDL42W705B</b>  &nbsp;&nbsp; output <b>Sony KDL 42 W 705 B </b>
         </p>
         <p>Searching with query <b>Sony 705</b> would not yield any results with this feature disabled. However, this feature enabled the query would return results.</p>
+    </div>
+</div>
+
+<div class='settingsbox'>
+    <h3>Synonym definitions</h3>
+    
+    	<div style='display:inline-block;float:left;clear:left;width:100%;'>
+    		<textarea name="synonyms" placeholder="Synonym definitions (optional)" style='width:100%;height:300px;'><?php print_r(implode("\n", $synonyms)); ?></textarea>
+        </div>
+	
+    <div style='float:left;clear:left;'>
+    	<p>
+    		You can define an optional list of synonyms. Words on the same row are considered to have the same meaning. Gives more results when used.
+        </p>
+        <p>
+        	Example values:<br>
+            computer, pc<br>
+            color, colour<br>
+            theatre, theater<br>
+            amazing, incredible, fabulous, wonderful, fantastic<br>
+        </p>
     </div>
 </div>
 

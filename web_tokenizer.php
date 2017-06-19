@@ -119,6 +119,12 @@ if ( $dialect_processing )
 	}
 }
 
+# if user has defined synonyms
+if ( !empty($synonyms) )
+{
+	$expanded_synonyms = expand_synonyms($synonyms);
+}
+
 # user defined keywords ? 
 if ( !empty($url_keywords) )
 {
@@ -1346,6 +1352,38 @@ while ( !empty($url_list[$lp]) )
 							$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $field_pos)";
 						}
 						++$t_pos;
+					}
+				}
+				
+				if ( !empty($expanded_synonyms[$match]) )
+				{
+					foreach ( $expanded_synonyms[$match] as $token_part )
+					{
+						$temporary_token_ids[$token_part] = 1;
+						
+						$crc32 = crc32($token_part);
+						$b = md5($token_part);
+						$tid = hexdec($b[0].$b[1].$b[2].$b[3]);
+						$field_pos = ($pos << $bitshift) | $field_id;
+						
+						# sentiment score
+						if ( !empty($word_sentiment_scores[$token_part]) )
+						{
+							$wordsentiscore = $word_sentiment_scores[$token_part];
+						}
+						else
+						{
+							$wordsentiscore = 0;
+						}
+						
+						if ( $sentiment_analysis ) 
+						{
+							$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $field_pos, $wordsentiscore)";
+						}
+						else
+						{
+							$insert_data_sql	.= ",($crc32, $tid, :doc_id$aw, $field_pos)";
+						}
 					}
 				}
 				

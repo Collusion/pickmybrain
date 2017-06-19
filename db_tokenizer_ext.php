@@ -79,6 +79,12 @@ if ( $dialect_processing )
 	}
 }
 
+# if user has defined synonyms
+if ( !empty($synonyms) )
+{
+	$expanded_synonyms = expand_synonyms($synonyms);
+}
+
 /*
 	Prepare data for the HTML preprocessor
 */
@@ -944,6 +950,23 @@ while ( true )
 							$tokens[$token_part] .= " ".$PackedIntegers->int_to_bytes(($t_pos<<$bitshift)|$f_id);
 						}
 						++$t_pos;
+					}
+				}
+				
+				if ( !empty($expanded_synonyms[$match]) )
+				{
+					foreach ( $expanded_synonyms[$match] as $token_part )
+					{
+						$temporary_token_ids[$token_part] = 1;
+
+						if ( empty($tokens[$token_part]) ) 
+						{
+							$tokens[$token_part] = " ".$PackedIntegers->int_to_bytes(($pos<<$bitshift)|$f_id);
+						}
+						else
+						{
+							$tokens[$token_part] .= " ".$PackedIntegers->int_to_bytes(($pos<<$bitshift)|$f_id);
+						}
 					}
 				}
 

@@ -50,6 +50,7 @@ $ignore_chars 		= array (
   0 => '\'',
 );
 $separate_alnum		= 0;
+$synonyms 			= array();
 						
 # runtime
 $field_weights      = array();

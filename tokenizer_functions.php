@@ -424,6 +424,49 @@ function execWithCurl($url, $async = true)
 	return $content;
 }
 
+function expand_synonyms($synonyms) 
+{
+	$expanded_synonyms = array();
+	
+	if ( empty($synonyms) || !is_array($synonyms) )
+	{
+		return $expanded_synonyms;
+	}
+	
+	foreach ( $synonyms as $synonym_list )
+	{
+		$loop_assoc = array();
+		$parts = explode(",", $synonym_list);
+		$parts_trimmed = array();
+		
+		foreach ( $parts as $part )
+		{
+			$part = trim($part);
+			if ( $part !== "" )
+			{
+				$parts_trimmed[] = $part; 
+				$loop_assoc[$part] = array();
+			}
+		}
+		
+		foreach ( $loop_assoc as $synonym => $e_array ) 
+		{
+			foreach ( $parts_trimmed as $synonym_word ) 
+			{
+				if ( $synonym !== $synonym_word )
+				{
+					$loop_assoc[$synonym][] = $synonym_word;
+				}
+			}
+		}
+		
+		# merge into expanded synonyms
+		$expanded_synonyms += $loop_assoc;
+	}
+	
+	return $expanded_synonyms;
+}
+
 function StringToKeywords($string)
 {
 	$string = trim($string);
@@ -785,6 +828,26 @@ function write_settings(array $settings, $index_id = 0)
 			}
 			break;
 			
+			case 'synonyms':
+			if ( isset($setting_value) )
+			{
+				$synonyms = array();
+				if ( !empty($setting_value) )
+				{
+					$expl = explode("\n", $setting_value);
+					
+					foreach ( $expl as $attr ) 
+					{
+						$attr = trim($attr);
+						if ( !empty($attr) )
+						{
+							$synonyms[] = $attr;
+						}
+					}
+				}				
+			}
+			break;
+			
 			case 'ranged_query_value':
 			if ( isset($setting_value) && is_numeric($setting_value) && $setting_value >= 0 && $setting_value <= 10000000 )
 			{
@@ -888,7 +951,7 @@ function write_settings(array $settings, $index_id = 0)
 			case 'field_weight_':
 			if ( isset($setting_value) ) 
 			{		
-				if ( is_numeric($setting_value) && $setting_value >= 1 ) 
+				if ( is_numeric($setting_value) && $setting_value >= 0 ) 
 				{
 					$field_weights[$field_weight_attribute] = (int)$setting_value;
 				}
@@ -1383,6 +1446,7 @@ charset				= \"$charset\"
 separate_alnum			= $separate_alnum
 delta_indexing			= $delta_indexing
 delta_merge_interval	= $delta_merge_interval
+".ini_array_value_export("synonyms", $synonyms)."
 					
 ; runtime
 " . ini_array_value_export("field_weights", $field_weights, true) . "
@@ -2363,11 +2427,11 @@ function SetProcessState($index_id, $process_number, $process_state)
 			echo "SetProcessState failure #2: " . $e->getMessage() . "\n";
 		}
 	}
-}
+} 
 
 function blended_chars_new($data) 
 {
-	#$data[0]; # matches word
+	#$data[0]; # matched word
 	#$data[1]; # blend char 
 	$data[0] = trim($data[0], " \t\n\r\0\x0B" . $data[1]);
 	$ret = str_replace($data[1], " ", $data[0]);	#  s.t.a.l.k.e.r. => s t a l k e r

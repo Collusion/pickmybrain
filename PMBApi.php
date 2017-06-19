@@ -102,6 +102,7 @@ class PickMyBrain
 	private $disabled_documents;
 	private $sql_body;
 	private $primary_key;
+	private $enabled_fields;
 		
 	public function __construct($index_name = "")
 	{
@@ -245,7 +246,7 @@ class PickMyBrain
 		
 		return (int)(log($number_of_fields,2)+1);
 	}
-	
+
 	private function CreateFieldWeightLookup()
 	{
 		if ( empty($this->field_weights) ) return false;
@@ -266,75 +267,6 @@ class PickMyBrain
 		return $scores;
 	}
 
-	
-	private function CreatePrefixes($word)
-	{
-		$prefix_array = array();
-		
-		# dialect processing: remove dialect ( ä, ö, å + etc) from tokens and add as prefix
-		if ( $this->dialect_matching && !empty($this->dialect_find) )
-		{
-			$nodialect = str_replace($this->dialect_find, $this->dialect_replace, $word);
-			if ( $nodialect !== $word ) 
-			{
-				$prefix_array[$nodialect] = 0;
-			}
-		}
-	
-		# if prefix_mode > 0, prefixing is enabled
-		if ( $this->prefix_mode ) 
-		{
-			$min_prefix_len = $this->prefix_length;
-			/*
-			prefix_mode 1 = prefixes
-			prefix_mode 2 = prefixes + postifes
-			prefix_mode 3 = infixes
-			*/
-			
-			$wordlen = mb_strlen($word);
-			if ( $wordlen > $min_prefix_len ) 
-			{
-				if ( $this->prefix_mode === 3 ) 
-				{
-					# infixes
-					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i ) 
-					{
-						for ( $j = 0 ; ($i + $j) <= $wordlen ; ++$j )
-						{
-							$prefix_array[mb_substr($word, $j, $i)] = $wordlen - $i;
-						}
-					}
-				}
-				else if ( $this->prefix_mode === 2 )
-				{
-					# prefixes and postfixes
-					# prefix
-					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
-					{
-						$prefix_array[mb_substr($word, 0, $i)] = $wordlen - $i;
-					}
-					
-					# postfix
-					for ( $i = 1 ; $wordlen-$i >= $min_prefix_len ; ++$i )
-					{
-						$prefix_array[mb_substr($word, $i)] = $i;
-					}
-				}
-				else
-				{
-					# default: prefixes only
-					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
-					{
-						$prefix_array[mb_substr($word, 0, $i)] = $wordlen - $i;
-					}
-				}
-				
-			}
-		}
-		
-		return $prefix_array;	
-	}
-	
 	public function IncludeOriginalData($value)
 	{
 		if ( !empty($value) )
@@ -766,6 +698,24 @@ class PickMyBrain
 			return $this->result;	
 		}
 		
+		# create a 
+		$i = 0;
+		$this->enabled_fields = 0;
+		foreach ( $this->field_weights as $field_score ) 
+		{
+			if ( $field_score > 0 ) 
+			{
+				$this->enabled_fields |= (1 << $i);
+			}
+			++$i;
+		}
+		
+		if ( $this->enabled_fields === 0 ) 
+		{
+			$this->result["error"] = "All data fields are disabled. At least one field must have non-zero field weight.";
+			return $this->result;
+		}
+		
 		if ( !empty($this->main_sql_attrs) )
 		{
 			$main_sql_attrs = array_flip($this->main_sql_attrs);
@@ -903,7 +853,7 @@ class PickMyBrain
 		
 		# create field weight lookup
 		$weighted_score_lookup = $this->CreateFieldWeightLookup();
-		
+				
 		# count set bits for each index of weight_score_lookup -table
 		foreach ( $weighted_score_lookup as $wi => $wscore )
 		{
@@ -2215,32 +2165,43 @@ class PickMyBrain
 										}
 
 										$field_id_bit = 1 << ($delta & $this->lsbits);
-										$field_pos = $delta >> $this->field_id_width;
-
-										# self score match
-										$self_score |= $field_id_bit;
-
-										# if there is a match in the same field 
-										if ( $position_storage[$field_id_bit][$prev_group] === $field_pos-1 )
-										{
-											$phrase_data[$qind] |= $field_id_bit;
-											
-											if ( $exact_mode ) 
-											{
-												unset($exact_ids_lookup_copy[(1<<$qind)|(1<<$prev_group)]);	
-											}
-										}
-										# if field_pos is 1 and token group is 0 -> exact match
-										else if ( $field_pos+$qind === 1 ) 
-										{
-											$exact_match = true;
-										}
 										
-										$position_storage[$field_id_bit][$qind] = $field_pos;	
+										if ( $field_id_bit & $this->enabled_fields )
+										{
+											$field_pos = $delta >> $this->field_id_width;
+	
+											# self score match
+											$self_score |= $field_id_bit;
+	
+											# if there is a match in the same field 
+											if ( $position_storage[$field_id_bit][$prev_group] === $field_pos-1 )
+											{
+												$phrase_data[$qind] |= $field_id_bit;
+												
+												if ( $exact_mode ) 
+												{
+													unset($exact_ids_lookup_copy[(1<<$qind)|(1<<$prev_group)]);	
+												}
+											}
+											# if field_pos is 1 and token group is 0 -> exact match
+											else if ( $field_pos+$qind === 1 ) 
+											{
+												$exact_match = true;
+											}
+											
+											$position_storage[$field_id_bit][$qind] = $field_pos;
+										}
 									}
 									
 									++$x;
 								}
+							}
+							
+							if ( !$self_score ) 
+							{
+								# self_score is zero => none of the keywords were found on enabled fields
+								# this document is not a match
+								continue;
 							}
 							
 							$document_count[$qind] += $x - $this->sentiment_index;
