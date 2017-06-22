@@ -290,7 +290,7 @@ if ( isset($innodb_row_format) )
 # 2. indexer is launched via command line
 # 3. but document root is not defined ( index is created with the cli tool )
 # => enable script execution through exec()
-if ( !$enable_exec && !empty($argv) && empty($document_root) ) 
+if ( !$enable_exec && !empty($argv) && (empty($document_root) || empty($_SERVER['SERVER_NAME'])) ) 
 {
 	$enable_exec = 1;
 }
