@@ -1,12 +1,12 @@
 <?php
 
-/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * with this file. If not, please write to: henri.ruutinen@pickmybra.in
+ * or visit: http://www.pickmybra.in
  */
 
 # check input parameters only if process number is not defined at all
@@ -182,14 +182,12 @@ try
 				# prefix crc32 value, original token crc32 checksum, how many characters have been cut of from the original word 
 				++$pr;
 				$prefix_word = crc32($nodialect);
-				if ( empty($write_buffer[$prefix_word]) )
+				if ( !isset($write_buffer[$prefix_word]) )
 				{
-					#$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted);
 					$write_buffer[$prefix_word] = array($token_crc32_shifted);
 				}
 				else
 				{
-					#$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted);
 					$write_buffer[$prefix_word][] = $token_crc32_shifted;
 				}
 			}
@@ -215,14 +213,12 @@ try
 						for ( $j = 0 ; ($i + $j) <= $wordlen ; ++$j )
 						{
 							$prefix_word = crc32(mb_substr($token, $j, $i));
-							if ( empty($write_buffer[$prefix_word]) ) 
+							if ( !isset($write_buffer[$prefix_word]) ) 
 							{
-								#$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
 								$write_buffer[$prefix_word] = array($token_crc32_shifted|($wordlen-$i));
 							}
 							else
 							{
-								#$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
 								$write_buffer[$prefix_word][] = $token_crc32_shifted|($wordlen-$i);
 							}
 
@@ -237,13 +233,13 @@ try
 					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
 					{
 						$prefix_word = crc32(mb_substr($token, 0, $i));
-						if ( empty($write_buffer[$prefix_word]) )
+						if ( !isset($write_buffer[$prefix_word]) )
 						{
-							$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+							$write_buffer[$prefix_word] = array($token_crc32_shifted|($wordlen-$i));
 						}
 						else
 						{
-							$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+							$write_buffer[$prefix_word][] = $token_crc32_shifted|($wordlen-$i);
 						}
 
 						++$pr;
@@ -253,13 +249,13 @@ try
 					for ( $i = 1 ; $wordlen-$i >= $min_prefix_len ; ++$i )
 					{
 						$prefix_word = crc32(mb_substr($token, $i));
-						if ( empty($write_buffer[$prefix_word]) )
+						if ( !isset($write_buffer[$prefix_word]) )
 						{
-							$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|$i);
+							$write_buffer[$prefix_word] = array($token_crc32_shifted|$i);
 						}
 						else
 						{
-							$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|$i);
+							$write_buffer[$prefix_word][] = $token_crc32_shifted|$i;
 						}
 						
 						++$pr;
@@ -271,13 +267,13 @@ try
 					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
 					{
 						$prefix_word = crc32(mb_substr($token, 0, $i)); 
-						if ( empty($write_buffer[$prefix_word]) ) 
+						if ( !isset($write_buffer[$prefix_word]) ) 
 						{
-							$write_buffer[$prefix_word] = " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+							$write_buffer[$prefix_word] = array($token_crc32_shifted|($wordlen-$i));
 						}
 						else
 						{
-							$write_buffer[$prefix_word] .= " ".$PackedIntegers->int_to_bytes($token_crc32_shifted|($wordlen-$i));
+							$write_buffer[$prefix_word][] = $token_crc32_shifted|($wordlen-$i);
 						}
 
 						++$pr;
