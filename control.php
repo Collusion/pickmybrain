@@ -1619,7 +1619,10 @@ switch ( $innodb_row_format )
     	<input type="text" name="ranged_query_value" style="width:100px;" value="<?php echo $ranged_query_value; ?>"/> documents
     </p>
     <p>
-    	If you want also to group, sort or filter results by other than their relevancy, you can define some columns in your SQL-query as attributes. The data type of these columns must be integer. If grouping by a textual column is required, please use an applicable checksum function, like CRC32(text_column).
+    	If you want also to group, sort or filter results by other than their relevancy, you can define some columns in your SQL-query as attributes. 
+        The data type of these columns must be integer. If grouping by a textual column is required, please use an applicable checksum function, like CRC32(text_column).
+        <br><br>
+        <b>Example:</b> SELECT ID, text, name FROM mytable <b class='cyan'>&nbsp;&gt;&gt;&nbsp;</b>SELECT ID, text, name, CRC32(name) as name_int FROM mytable ( this indexes the original name-field and allows you to sort/filter/group results with the name_int column, which must be defined as an attribute. ) 
         <br>
         <br>
         Please separate the attributes with a line break and make sure, that the names are exact matches of those in the SQL-query.
