@@ -2005,6 +2005,9 @@ switch ( $innodb_row_format )
         Input: <i><b>hellsinki</b></i> &nbsp;&nbsp; Did you mean: <i><b>helsinki</b></i>
         <br />
         Input: <i><b>dynamiclly</b></i> &nbsp;&nbsp; Did you mean: <i><b>dynamically</b></i>
+        <br>
+        <br>
+        Suggestions, if enabled ( and present ) can be found from the result variable $result["did_you_mean"] ( $result = $pmbinstance->Search("misstyped"); )
     </p>
     <p>
    		<input type="radio" name='keyword_suggestions' value='0' <?php echo $keyword_suggestions_0; ?> /> Disabled
