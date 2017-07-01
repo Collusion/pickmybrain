@@ -51,6 +51,7 @@ class PickMyBrain
 	private $field_weights;
 	private $sentiweight;
 	private $keyword_stemming;
+	private $keyword_suggestions;
 	private $dialect_matching;
 	private $dialect_replacing;
 	private $quality_scoring;
@@ -92,6 +93,7 @@ class PickMyBrain
 	private $non_scored_sortmodes;
 	private $hex_lookup_decode;
 	private $hex_lookup_encode;
+	private $meta_lookup_encode;
 	private $documents_in_collection;
 	private $delta_documents;
 	private $index_state;
@@ -103,6 +105,7 @@ class PickMyBrain
 	private $sql_body;
 	private $primary_key;
 	private $enabled_fields;
+	private $final_doc_matches;
 		
 	public function __construct($index_name = "")
 	{
@@ -116,8 +119,27 @@ class PickMyBrain
 			$bin_val = pack("H*", sprintf("%02x", $i));
 			$this->hex_lookup_decode[$bin_val] = $i;
 			$this->hex_lookup_encode[$i] = $bin_val;
-		}	
-			
+		}
+		
+		# lookup table for encoding metaphone values
+		$this->meta_lookup_encode = array (
+									  ' ' => 0,
+									  'N' => 1,
+									  'K' => 2,
+									  'A' => 3,
+									  'P' => 4,
+									  'T' => 5,
+									  'S' => 6,
+									  'F' => 7,
+									  'L' => 8,
+									  'M' => 9,
+									  'X' => 10,
+									  'R' => 11,
+									  'H' => 12,
+									  'J' => 13,
+									  '0' => 14,
+									);
+									
 		# lookup tables for sorting/grouping modes
 		$this->allowed_sort_modes = array();
 		$this->allowed_grouping_modes = array();
@@ -168,6 +190,7 @@ class PickMyBrain
 		
 		# these settings are index specific		
 		$this->sentiweight			= $sentiweight;
+		$this->keyword_suggestions	= $keyword_suggestions;
 		$this->keyword_stemming 	= $keyword_stemming;
 		$this->dialect_matching 	= $dialect_matching;
 		$this->quality_scoring		= $quality_scoring;
@@ -181,7 +204,7 @@ class PickMyBrain
 		$this->max_results			= 1000;
 		$this->temp_grouper_size	= 10000;
 		$this->charset_regexp		= "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "*\"]/u";
-		$this->blend_chars			= $blend_chars;
+		$this->blend_chars			= array();
 		$this->ignore_chars			= $ignore_chars;
 		$this->result				= array();
 		$this->current_index		= $index_id;
@@ -191,6 +214,21 @@ class PickMyBrain
 		$this->sentiment_index		= ($sentiment_analysis) ? 1 : 0 ;
 		$this->data_columns			= $data_columns;
 		$this->field_weights 		= $field_weights;
+		
+		if ( !empty($blend_chars) )
+		{
+			# filter out blend chars in certain situations
+			foreach ( $blend_chars as $blend_char ) 
+			{
+				$this->blend_chars[] = " $blend_char ";
+				$this->blend_chars[] = "$blend_char ";
+				
+				if ( $blend_char !== "-" )
+				{
+					$this->blend_chars[] = " $blend_char";
+				}
+			}
+		}
 		
 		if ( isset($use_internal_db) )
 		{
@@ -677,6 +715,546 @@ class PickMyBrain
 		
 	}
 	
+	private function metaphone_to_int16($metaphone)
+	{
+		# normalize metaphone to 4 characters
+		$metaphone = str_pad($metaphone, 4, " ", STR_PAD_LEFT);
+		$integer = 0;
+		$shift = 0;
+		
+		for ( $i = 0 ; $i < 4 ; ++$i ) 
+		{
+			$integer |= ($this->meta_lookup_encode[$metaphone[$i]] << ($shift*4));
+			++$shift;
+		}
+		
+		return $integer;
+	}
+
+	private function StemKeyword($token)
+	{
+		$stem = "";
+		
+		# if keyword stemming is disabled, ignore this step 
+		if ( $this->keyword_stemming ) 
+		{
+			$keyword_len = mb_strlen($token);
+			$min_len = $keyword_len;
+			# stem keyword
+			$stem_en = PMBStemmer::stem_english($token);
+			$stem_fi = PMBStemmer::stem_finnish($token);
+	
+			$stem_en_len = mb_strlen($stem_en);
+			$stem_fi_len = mb_strlen($stem_fi);
+				
+			# english stem
+			if ( strpos($token, $stem_en) === 0 && $stem_en_len >= $this->prefix_length && $stem_en_len <= $min_len )
+			{
+				$min_len = $stem_en_len;
+				$stem = $stem_en;
+			}
+					
+			# finnish stem ( 
+			if ( strpos($token, $stem_fi) === 0 && $stem_fi_len >= $this->prefix_length && $stem_fi_len <= $min_len && $stem_fi_len > $keyword_len/2 )
+			{
+				$min_len = $stem_fi_len;
+				$stem = $stem_fi;
+			}
+		}
+		
+		return $stem;
+	}
+	
+	public function MetaphoneSearch($query)
+	{
+		if ( trim($query) === "" )
+		{
+			$this->result["error"] = "Query not defined";
+			return $this->result;
+		}
+		else if ( empty($this->current_index) )
+		{
+			$this->result["error"] = "Index is not defined - please call \$YourPMBInstance->SetIndex(\$index_name); before searching";
+			return $this->result;	
+		}
+
+		# replace all dialect tokens
+		$dialect_array = array( 'š'=>'s', 'ž'=>'z', 'à'=>'a', 'á'=>'a', 'â'=>'a', 'ã'=>'a', 'ä'=>'a', 'å'=>'a', 'æ'=>'a', 'ç'=>'c', 'č'=>'c', 'è'=>'e', 'é'=>'e', 
+							'ê'=>'e', 'ë'=>'e', 'ì'=>'i', 'í'=>'i', 'î'=>'i', 'ï'=>'i', 'ð'=>'d', 'ñ'=>'n', 'ò'=>'o', 'ó'=>'o', 'ô'=>'o', 'õ'=>'o',
+                            'ö'=>'o', 'ø'=>'o', 'ù'=>'u', 'ú'=>'u', 'û'=>'u', 'μ' => 'u', 'ý'=>'y', 'þ'=>'b', 'ÿ'=>'y', '$' => 's', 'ü' => 'u' , 'ş' => 's',
+							'ş' => 's', 'ğ' => 'g', 'ı' => 'i', 'ǐ' => 'i', 'ǐ' => 'i', 'ĭ' => 'i', 'ḯ' => 'i', 'ĩ' => 'i', 'ȋ' => 'i' );
+										
+		$mass_find 		= array_keys($dialect_array);
+		$mass_replace 	= array_values($dialect_array);
+		
+		# separate letters & numbers from each other?
+		if ( $this->separate_alnum ) 
+		{
+			$query = preg_replace('/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/u', ' ', $query);
+		}
+		
+		#  remove ignore chars
+		if ( !empty($this->ignore_chars) )
+		{
+			$query = str_replace($this->ignore_chars, "", $query);
+		}
+
+		# filter query with the charset regexp ( drops non-defined characters )
+		$query = preg_replace($this->charset_regexp, " ", $query);
+		
+		# filter out blend chars in certain situations
+		if ( !empty($this->blend_chars) )
+		{
+			$query = str_replace($this->blend_chars, " ", $query);
+		}
+		
+		if ( empty($query) )
+		{
+			return false;
+		}
+
+		$keyword_array = explode(" ", trim($query));
+		
+		foreach ( $keyword_array as $keyword ) 
+		{
+			# original keyword's byte length
+			$byte_len = strlen($keyword);
+			
+			# replace dialect tokens
+			$stripped_keyword = str_replace($mass_find, $mass_replace, $keyword);
+			
+			if ( ctype_alpha($stripped_keyword) )
+			{
+				$keyword_len = strlen($keyword);
+				
+				if ( $keyword_len >= 8 ) 
+				{
+					$keyword_max_distances[$keyword] = 3;
+				}
+				else if ( $keyword_len >= 6 ) 
+				{
+					$keyword_max_distances[$keyword] = 2;
+				}
+				else if ( $keyword_len >= 4 ) 
+				{
+					$keyword_max_distances[$keyword] = 1;
+				}
+				else
+				{
+					# keyword is too short
+					continue;
+				}
+
+				# keyword byte length	
+				$byte_len_min = $byte_len-$keyword_max_distances[$keyword];
+				$byte_len_max = $byte_len+$keyword_max_distances[$keyword];
+
+				# get metaphones of this keyword
+				$metaphones = double_metaphone($stripped_keyword);
+				
+				# get the encoded 16bit metaphone
+				$encoded_metaphone = $this->metaphone_to_int16($metaphones["primary"]);
+				
+				if ( $encoded_metaphone !== 0 ) 
+				{
+					# form pairs original keyword => [16bit metaphone]
+					$original_keywords[$keyword] = $encoded_metaphone;
+					
+					# form pairs [16bit metaphone] => original keyword
+					$encoded_metaphones[$encoded_metaphone] = $keyword;
+					
+					# create a stemmed version of the keyword
+					$keyword_stems[$encoded_metaphone] = $this->StemKeyword($keyword);
+		
+					# form sql query
+					$metaphone_sql[$encoded_metaphone] = "(metaphone = $encoded_metaphone AND LENGTH(token) >= $byte_len_min AND LENGTH(token) <= $byte_len_max)";
+				}
+			}
+		}
+		
+		if ( !empty($metaphone_sql) )
+		{
+			try
+			{
+				$pdo = $this->db_connection->query("SELECT metaphone, doc_matches, token FROM PMBTokens_" . $this->index_id . " WHERE " . implode(" OR ", $metaphone_sql));
+
+				$sum = 0;
+				$count = 0;
+				$distance_sum = 0;
+				
+				$existing_prefix_matches = array();
+				
+				while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) )
+				{
+					# original token
+					$original_token = $encoded_metaphones[(int)$row["metaphone"]];
+					
+					if ( !isset($prefix_group_counts[$original_token]) )
+					{
+						$prefix_group_counts[$original_token] = 0;
+					}
+
+					# now calculate levenshtein distance, 2 max ! 
+					$distance = levenshtein($row["token"], $original_token);
+
+					# difference is too big; abort ! 
+					if ( $distance > $keyword_max_distances[$original_token] ) 
+					{
+						continue;
+					}
+					
+					if ( $row["token"] === $original_token ) 
+					{
+						# store original tokens into a specific array
+						$original_match_data[$original_token] = (int)$row["doc_matches"];
+						
+						$existing_prefix_matches[$original_token][0] = 0;
+						$existing_prefix_matches[$original_token][1] = $row["token"];
+						$existing_prefix_matches[$original_token][2] = (int)$row["doc_matches"];
+						
+						$prefix_group_counts[$original_token] += (int)$row["doc_matches"];
+						
+						continue;
+					}
+					else
+					{
+						/*
+						STEP 1 : pre-filtering for prefix-matches
+						         if one of these prefix-matches is better than the matches later 
+								 ==> suggest the prefix with smallest levenshtein distance instead
+						*/
+						
+						if ( $this->prefix_mode )
+						{
+							# if prefixes are enabled, this token can be matched with them ( no need to provide a corrected suggestion ) 
+							if ( strpos($row["token"], $original_token) !== false ) 
+							{
+								if ( isset($existing_prefix_matches[$original_token])  )
+								{
+									if ( $existing_prefix_matches[$original_token][0] > $distance )
+									{
+										$existing_prefix_matches[$original_token][0] = $distance;
+										$existing_prefix_matches[$original_token][1] = $row["token"];
+										$existing_prefix_matches[$original_token][2] = (int)$row["doc_matches"];
+									}
+									else if ( $existing_prefix_matches[$original_token][0] === $distance && $existing_prefix_matches[$original_token][2] < $row["doc_matches"] )
+									{
+										# distance is same, compary doc matches
+										$existing_prefix_matches[$original_token][0] = $distance;
+										$existing_prefix_matches[$original_token][1] = $row["token"];
+										$existing_prefix_matches[$original_token][2] = (int)$row["doc_matches"];
+									}
+								}
+								else
+								{
+									$existing_prefix_matches[$original_token][0] = $distance;
+									$existing_prefix_matches[$original_token][1] = $row["token"];
+									$existing_prefix_matches[$original_token][2] = (int)$row["doc_matches"];
+								}
+								
+								$prefix_group_counts[$original_token] += (int)$row["doc_matches"];
+
+								continue;
+							}
+							else
+							{
+								# no match, try stemming the keyword
+								$keyword_stem = $keyword_stems[(int)$row["metaphone"]];
+								
+								if ( !empty($keyword_stem) && strpos($row["token"], $keyword_stem) !== false )
+								{
+									# stemmed version available and it is a prefix match ! 
+									if ( isset($existing_prefix_matches[$original_token])  )
+									{
+										if ( $existing_prefix_matches[$original_token][0] > $distance )
+										{
+											$existing_prefix_matches[$original_token][0] = $distance;
+											$existing_prefix_matches[$original_token][1] = $row["token"];
+											$existing_prefix_matches[$original_token][2] = (int)$row["doc_matches"];
+										}
+										else if ( $existing_prefix_matches[$original_token][0] === $distance && $existing_prefix_matches[$original_token][2] < $row["doc_matches"] )
+										{
+											# distance is same, compary doc matches
+											$existing_prefix_matches[$original_token][0] = $distance;
+											$existing_prefix_matches[$original_token][1] = $row["token"];
+											$existing_prefix_matches[$original_token][2] = (int)$row["doc_matches"];
+										}
+									}
+									else
+									{
+										$existing_prefix_matches[$original_token][0] = $distance;
+										$existing_prefix_matches[$original_token][1] = $row["token"];
+										$existing_prefix_matches[$original_token][2] = (int)$row["doc_matches"];
+									}
+									
+									$prefix_group_counts[$original_token] += (int)$row["doc_matches"];
+									
+									continue;
+								}
+							}
+						}					
+					}
+					
+					/*
+						STEP 3: if we are here, the token is not a prefix match ( or prefixing is disabled )  and must still be considered as a valid alternative
+					*/
+					
+					$distance_sum += $distance;
+					$sum += (int)$row["doc_matches"];	
+					++$count;
+
+					if ( !isset($alt_tokens[$original_token]) ) 
+					{
+						$alt_tokens[$original_token] = array();
+						$alt_tokens[$original_token][] 	= array($distance, $row["token"], (int)$row["doc_matches"]);
+					}
+					else
+					{
+						$alt_tokens[$original_token][] 	= array($distance, $row["token"], (int)$row["doc_matches"]);
+					}
+					
+				}
+		
+				$final_suggestions = array();
+				
+				# this specific number tells how many "virtual" document matches at least each token has if found in the index
+				# prevents suggestions with too small document count difference
+				# example: original 1 match, suggestion 3 matches
+				$minimum_doc_matches = round(pow($this->documents_in_collection, 1/8));
+
+				foreach ( $original_keywords as $original_token => $metaphone ) 
+				{
+					if ( !empty($alt_tokens[$original_token]) )
+					{
+						# use an anonymous function to sort the multidimensional array
+						usort($alt_tokens[$original_token], function($a, $b) {
+							return $a[0] - $b[0];
+						});
+						
+						# contains expanded matches ( original + all prefix matches )
+						if ( isset($this->final_doc_matches[$original_token]) )
+						{
+							#echo "USING FINAL DOC MATCHES \n";
+							$original_match_count = $this->final_doc_matches[$original_token];
+							$max_matches = $original_match_count;
+						}
+						# contains original token matches 
+						else if ( isset($original_match_data[$original_token]) )
+						{
+							$original_match_count = $original_match_data[$original_token];
+							
+							# if the original token is a match, but resultcount is very small
+							if ( $original_match_count <= $minimum_doc_matches ) 
+							{
+								$max_matches = $minimum_doc_matches;
+							}
+							# otherwise act normally
+							else
+							{
+								$max_matches  = $original_match_count;
+							}
+							
+							# metaphone matches that are also prefix matches
+							$max_matches += $prefix_group_counts[$original_token];
+						}
+						else
+						{
+							# no original matches found, smaller amount of matches suffices
+							$original_match_count = 1;
+							$max_matches = 1;
+							
+							# metaphone matches that are also prefix matches
+							$max_matches += $prefix_group_counts[$original_token]; 
+						}
+
+						$min_distance = 20;
+
+						foreach ( $alt_tokens[$original_token] as $data_values ) 
+						{
+							$distance 				= $data_values[0];
+							$alternative_token 		= $data_values[1];
+							$alternative_matchcount = $data_values[2];
+
+							# score_limit_lookup will be dynamically calculated
+							if ( !isset($score_limit_lookup[$distance]) )
+							{
+								$score_limit_lookup[$distance] = pow($max_matches, 1+$distance);
+							}
+
+							# compare against prefix matches ( if availabe ) 
+							if ( isset($existing_prefix_matches[$original_token]) )
+							{
+								$p_len 			= $existing_prefix_matches[$original_token][0];
+								$p_token 		= $existing_prefix_matches[$original_token][1];
+								$p_doc_matches 	= $existing_prefix_matches[$original_token][2];
+								
+								if ( $p_len <= $min_distance && $p_len <= $distance && $p_doc_matches >= $alternative_matchcount && $p_doc_matches >= $max_matches )
+								{
+									# the actual doc_matches count is not important, because documents will be matched through prefix matching ( over many keywords ) 
+									# only distance is importantken: $p_token current: $alternative_token) ";
+									
+									# overwrite values 
+									if ( $original_token !== $p_token ) 
+									{
+										$final_suggestions[$original_token] = $p_token;	
+									}
+									
+									continue;
+								}
+							}
+							
+							# assign a new better value
+							if ( $alternative_matchcount >= $score_limit_lookup[$distance] && $alternative_matchcount > $max_matches ) 
+							{
+								if ( $original_token !== $alternative_token )
+								{
+									# maybe use another if clause for these two 
+									$min_distance = $distance;
+									$max_matches  = $alternative_matchcount;
+									
+									$final_suggestions[$original_token] = $alternative_token;	
+								}
+							}
+						}
+						
+						
+					}
+					else if ( !isset($original_match_data[$original_token]) && isset($existing_prefix_matches[$original_token]) ) 
+					{
+						# exception 1: 
+						# original provided token does not return any results ( as strict match ) 
+						# no alternative tokens present
+						# prefix matches present ( non-stemmed !!! )
+						# even if the keyword would return results, try suggesting a better alternative... ( the best prefix match! ) 
+						# distance must not exceed 
+						$final_suggestions[$original_token] = $existing_prefix_matches[$original_token][1];	
+					}
+				}
+				
+				if ( !empty($final_suggestions) )
+				{
+					#echo "DID YOU MEAN:\n";
+					#var_dump($final_suggestions);
+				}
+				
+				return $final_suggestions;
+				
+			}
+			catch ( PDOException $e ) 
+			{
+				$this->result["error"] = "Something went wrong while investigating metaphones. Error message: ".$e->getMessage();
+			}
+		}
+		
+		return false;
+	}
+	
+	private function CreatePrefixes($word)
+	{
+		$prefix_array = array();
+		
+		# dialect processing: remove dialect ( ä, ö, å + etc) from tokens and add as prefix
+		if ( $this->dialect_matching && !empty($this->dialect_find) )
+		{
+			$nodialect = str_replace($this->dialect_find, $this->dialect_replace, $word);
+			if ( $nodialect !== $word ) 
+			{
+				$prefix_array[$nodialect] = 0;
+			}
+		}
+	
+		# if prefix_mode > 0, prefixing is enabled
+		if ( $this->prefix_mode ) 
+		{
+			$min_prefix_len = $this->prefix_length;
+			/*
+			prefix_mode 1 = prefixes
+			prefix_mode 2 = prefixes + postifes
+			prefix_mode 3 = infixes
+			*/
+			
+			$wordlen = mb_strlen($word);
+			if ( $wordlen > $min_prefix_len ) 
+			{
+				if ( $this->prefix_mode === 3 ) 
+				{
+					# infixes
+					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i ) 
+					{
+						for ( $j = 0 ; ($i + $j) <= $wordlen ; ++$j )
+						{
+							$prefix_array[mb_substr($word, $j, $i)] = $wordlen - $i;
+						}
+					}
+				}
+				else if ( $this->prefix_mode === 2 )
+				{
+					# prefixes and postfixes
+					# prefix
+					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
+					{
+						$prefix_array[mb_substr($word, 0, $i)] = $wordlen - $i;
+					}
+					
+					# postfix
+					for ( $i = 1 ; $wordlen-$i >= $min_prefix_len ; ++$i )
+					{
+						$prefix_array[mb_substr($word, $i)] = $i;
+					}
+				}
+				else
+				{
+					# default: prefixes only
+					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
+					{
+						$prefix_array[mb_substr($word, 0, $i)] = $wordlen - $i;
+					}
+				}
+				
+			}
+		}
+		
+		return $prefix_array;	
+	}
+	
+	private function longest_common_substring($words)
+	{
+		$words = array_map('mb_strtolower', array_map('trim', $words));
+		$sort_by_strlen = create_function('$a, $b', 'if (mb_strlen($a) === mb_strlen($b)) { return strcmp($a, $b); } return (mb_strlen($a) < mb_strlen($b)) ? -1 : 1;');
+		usort($words, $sort_by_strlen);
+		// We have to assume that each string has something in common with the first
+		// string (post sort), we just need to figure out what the longest common
+		// string is. If any string DOES NOT have something in common with the first
+		// string, return false.
+		$longest_common_substring = array();
+		$shortest_string = str_split(array_shift($words));
+		while ( sizeof($shortest_string) ) 
+		{
+		  array_unshift($longest_common_substring, '');
+		  foreach ($shortest_string as $ci => $char) 
+		  {
+			foreach ($words as $wi => $word) 
+			{
+			  if ( !strstr($word, $longest_common_substring[0] . $char)) 
+			  {
+				// No match
+				break 2;
+			  } // if
+			} // foreach
+			// we found the current char in each word, so add it to the first longest_common_substring element,
+			// then start checking again using the next char as well
+			$longest_common_substring[0].= $char;
+		  } // foreach
+		  // We've finished looping through the entire shortest_string.
+		  // Remove the first char and start all over. Do this until there are no more
+		  // chars to search on.
+		  array_shift($shortest_string);
+		}
+		// If we made it here then we've run through everything
+		usort($longest_common_substring, $sort_by_strlen);
+		return array_pop($longest_common_substring);
+	}
+	
 	public function Search($query, $offset = 0, $limit = 10)
 	{
 		$this->query_start_time = microtime(true);
@@ -686,6 +1264,8 @@ class PickMyBrain
 		$this->result["matches"]		= array();
 		$this->result["total_matches"] 	= 0;
 		$this->result["error"]			= "";
+		$this->result["warning"]		= "";
+		$this->final_doc_matches		= array();
 		
 		if ( trim($query) === "" )
 		{
@@ -698,7 +1278,7 @@ class PickMyBrain
 			return $this->result;	
 		}
 		
-		# create a 
+		# create a lookup variable for enabled fields
 		$i = 0;
 		$this->enabled_fields = 0;
 		foreach ( $this->field_weights as $field_score ) 
@@ -844,11 +1424,13 @@ class PickMyBrain
 		if ( (int)$offset !== $offset || $offset < 0 ) 
 		{
 			$offset = 0;
+			$this->result["warning"] = "offset must be an integer with minimum value of 0";
 		}
 		
 		if ( (int)$limit !== $limit || $limit < 1 ) 
 		{
 			$limit = 10;
+			$this->result["warning"] = "limit must be an integer with minimum value of 1";
 		}
 		
 		# create field weight lookup
@@ -887,20 +1469,7 @@ class PickMyBrain
 		# filter out blend chars in certain situations
 		if ( !empty($this->blend_chars) )
 		{
-			$blend_chars_to_trim = array();
-			
-			foreach ( $this->blend_chars as $blend_char ) 
-			{
-				$blend_chars_to_trim[] = " $blend_char ";
-				$blend_chars_to_trim[] = "$blend_char ";
-				
-				if ( $blend_char !== "-" )
-				{
-					$blend_chars_to_trim[] = " $blend_char";
-				}
-			}
-			
-			$query = str_replace($blend_chars_to_trim, " ", $query);
+			$query = str_replace($this->blend_chars, " ", $query);
 		}
 
 		/* Exact matching ?*/
@@ -962,7 +1531,7 @@ class PickMyBrain
 		{
 			return $this->result;
 		}
-
+		
 		$token_array = array_count_values(explode(" ", $query));
 		unset($token_array[""]);
 		$token_sql = array();
@@ -1481,6 +2050,14 @@ class PickMyBrain
 				++$tic;
 			}
 			
+			foreach ( $token_order_rev as $token => $order_index )
+			{
+				if ( isset($sumcounts[$order_index]) )
+				{
+					$this->final_doc_matches[$token] = $sumcounts[$order_index];
+				}
+			}
+
 			# close cursor
 			$tokpdo->closeCursor();
 			
@@ -1488,6 +2065,27 @@ class PickMyBrain
 			$this->db_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
 			
 			$this->result["stats"]["payload_time"] = microtime(true) - $payload_start;
+			
+			# keyword suggestions
+			if ( !empty($this->keyword_suggestions) )
+			{
+				$suggestions = $this->MetaphoneSearch($query);
+				
+				if ( !empty($suggestions) )
+				{
+					$did_you_mean = $query;
+					
+					foreach ( $suggestions as $original => $suggestion )
+					{
+						$did_you_mean = str_replace($original, $suggestion, $did_you_mean);
+					}
+					
+					$this->result["did_you_mean"] = $did_you_mean;
+				}
+			}
+			
+			# reset keyword statistics
+			$this->final_doc_matches = array();
 
 			# no matches :( 
 			if ( $tic === 0 )
@@ -4588,6 +5186,1065 @@ class PMBStemmer
 			   AND $matches[1]{2} != 'x'
 			   AND $matches[1]{2} != 'y';
 	}
+}
+
+/**
+ * Name:		double_metaphone( $string )
+ * Purpose:		Get the primary and secondary double metaphone tokens
+ * Return:		Array: if secondary == primary, secondary = NULL
+ */
+
+/**
+ * VERSION
+ * 
+ * DoubleMetaphone Functional 1.01 (altered)
+ * 
+ * DESCRIPTION
+ * 
+ * This function implements a "sounds like" algorithm developed
+ * by Lawrence Philips which he published in the June, 2000 issue
+ * of C/C++ Users Journal.  Double Metaphone is an improved
+ * version of Philips' original Metaphone algorithm.
+ * 
+ * COPYRIGHT
+ * 
+ * Slightly adapted from the class by Stephen Woodbridge.
+ * Copyright 2001, Stephen Woodbridge <woodbri@swoodbridge.com>
+ * All rights reserved.
+ * 
+ * http://swoodbridge.com/DoubleMetaPhone/
+ * 
+ * This PHP translation is based heavily on the C implementation
+ * by Maurice Aubrey <maurice@hevanet.com>, which in turn  
+ * is based heavily on the C++ implementation by
+ * Lawrence Philips and incorporates several bug fixes courtesy
+ * of Kevin Atkinson <kevina@users.sourceforge.net>.
+ * 
+ * This module is free software; you may redistribute it and/or
+ * modify it under the same terms as Perl itself.
+ * 
+ * 
+ * CONTRIBUTIONS
+ * 
+ * 2002/05/17 Geoff Caplan  http://www.advantae.com
+ *   Bug fix: added code to return class object which I forgot to do
+ *   Created a functional callable version instead of the class version
+ *   which is faster if you are calling this a lot.
+ * 
+ * 2013/05/04 Steen RÃ©mi
+ *   New indentation of the code for better readability
+ *   Some small alterations
+ *   Replace ereg by preg_match
+ *     ( ereg : This function has been DEPRECATED as of PHP 5.3.0 )
+ *   Improve performance (10 - 20 % faster)
+ *
+ * 2014/11/07 Ross Kelly
+ *   Reported a bug with the oreg_match change that it needed delimiters
+ *   around the the regular expressions.
+ */
+ 
+function double_metaphone( $string )
+{
+	$primary = '';
+	$secondary = '';
+	$current = 0;
+	$length = strlen( $string );
+	$last = $length - 1;
+	$original = strtoupper( $string ).'     ';
+
+	// skip this at beginning of word
+	if (string_at($original, 0, 2, array('GN','KN','PN','WR','PS'))){
+		$current++;
+	}
+
+	// Initial 'X' is pronounced 'Z' e.g. 'Xavier'
+	if (substr($original, 0, 1) == 'X'){
+		$primary   .= 'S'; // 'Z' maps to 'S'
+		$secondary .= 'S';
+		$current++;
+	}
+
+	// main loop
+
+	while (strlen($primary) < 4 || strlen($secondary) < 4){
+		if ($current >= $length){
+			break;
+		}
+
+		// switch (substr($original, $current, 1)){
+		switch ($original[$current]){
+			case 'A':
+			case 'E':
+			case 'I':
+			case 'O':
+			case 'U':
+			case 'Y':
+				if ($current == 0){
+					// all init vowels now map to 'A'
+					$primary   .= 'A';
+					$secondary .= 'A';
+				}
+				++$current;
+				break;
+
+			case 'B':
+				// '-mb', e.g. "dumb", already skipped over ...
+				$primary   .= 'P';
+				$secondary .= 'P';
+
+				if (substr($original, $current + 1, 1) == 'B'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				break;
+
+			case 'Ã‡':
+				$primary   .= 'S';
+				$secondary .= 'S';
+				++$current;
+				break;
+
+			case 'C':
+				// various gremanic
+				if ($current > 1
+				 && !is_vowel($original, $current - 2)
+				 && string_at($original, $current - 1, 3, array('ACH'))
+				 && (
+						(substr($original, $current + 2, 1) != 'I')
+					 && (
+							(substr($original, $current + 2, 1) != 'E')
+						 || string_at($original, $current - 2, 6, array('BACHER', 'MACHER'))
+						)
+					)
+				){
+					$primary   .= 'K';
+					$secondary .= 'K';
+					$current += 2;
+					break;
+				}
+
+				// special case 'caesar'
+				if ($current == 0
+				 && string_at($original, $current, 6, array('CAESAR'))
+				){
+					$primary   .= 'S';
+					$secondary .= 'S';
+					$current += 2;
+					break;
+				}
+
+				// italian 'chianti'
+				if (string_at($original, $current, 4, array('CHIA'))){
+					$primary   .= 'K';
+					$secondary .= 'K';
+					$current += 2;
+					break;
+				}
+
+				if (string_at($original, $current, 2, array('CH'))){
+
+					// find 'michael'
+					if ($current > 0
+					 && string_at($original, $current, 4, array('CHAE'))
+					){
+						$primary   .= 'K';
+						$secondary .= 'X';
+						$current += 2;
+						break;
+					}
+
+					// greek roots e.g. 'chemistry', 'chorus'
+					if ($current == 0
+					 && (
+							string_at($original, $current + 1, 5, array('HARAC', 'HARIS'))
+						 || string_at($original, $current + 1, 3, array('HOR', 'HYM', 'HIA', 'HEM'))
+						)
+					 && !string_at($original, 0, 5, array('CHORE'))
+					){
+						$primary   .= 'K';
+						$secondary .= 'K';
+						$current += 2;
+						break;
+					}
+
+					// germanic, greek, or otherwise 'ch' for 'kh' sound
+					if ((
+							string_at($original, 0, 4, array('VAN ', 'VON '))
+						 || string_at($original, 0, 3, array('SCH'))
+						)
+						// 'architect' but not 'arch', orchestra', 'orchid'
+					 || string_at($original, $current - 2, 6, array('ORCHES', 'ARCHIT', 'ORCHID'))
+					 || string_at($original, $current + 2, 1, array('T', 'S'))
+					 || (
+							(
+								string_at($original, $current - 1, 1, array('A','O','U','E'))
+							 || $current == 0
+							)
+							// e.g. 'wachtler', 'weschsler', but not 'tichner'
+						 && string_at($original, $current + 2, 1, array('L','R','N','M','B','H','F','V','W',' '))
+						)
+					){
+						$primary   .= 'K';
+						$secondary .= 'K';
+					} else {
+						if ($current > 0){
+							if (string_at($original, 0, 2, array('MC'))){
+								// e.g. 'McHugh'
+								$primary   .= 'K';
+								$secondary .= 'K';
+							} else {
+								$primary   .= 'X';
+								$secondary .= 'K';
+							}
+						} else {
+							$primary   .= 'X';
+							$secondary .= 'X';
+						}
+					}
+					$current += 2;
+					break;
+				}
+
+				// e.g. 'czerny'
+				if (string_at($original, $current, 2, array('CZ'))
+				 && !string_at($original, $current -2, 4, array('WICZ'))
+				){
+					$primary   .= 'S';
+					$secondary .= 'X';
+					$current += 2;
+					break;
+				}
+
+				// e.g. 'focaccia'
+				if (string_at($original, $current + 1, 3, array('CIA'))){
+					$primary   .= 'X';
+					$secondary .= 'X';
+					$current += 3;
+					break;
+				}
+
+				// double 'C', but not McClellan'
+				if (string_at($original, $current, 2, array('CC'))
+				 && !(
+						$current == 1
+					 && substr($original, 0, 1) == 'M'
+					)
+				){
+					// 'bellocchio' but not 'bacchus'
+					if (string_at($original, $current + 2, 1, array('I','E','H'))
+					 && !string_at($original, $current + 2, 2, array('HU'))
+					){
+						// 'accident', 'accede', 'succeed'
+						if ((
+								$current == 1
+							 && substr($original, $current - 1, 1) == 'A'
+							)
+						 || string_at($original, $current - 1, 5,array('UCCEE', 'UCCES'))
+						){
+							$primary   .= 'KS';
+							$secondary .= 'KS';
+							// 'bacci', 'bertucci', other italian
+						} else {
+							$primary   .= 'X';
+							$secondary .= 'X';
+						}
+						$current += 3;
+						break;
+					} else {
+						// Pierce's rule
+						$primary   .= 'K';
+						$secondary .= 'K';
+						$current += 2;
+						break;
+					}
+				}
+
+				if (string_at($original, $current, 2, array('CK','CG','CQ'))){
+					$primary   .= 'K';
+					$secondary .= 'K';
+					$current += 2;
+					break;
+				}
+
+				if (string_at($original, $current, 2, array('CI','CE','CY'))){
+					// italian vs. english
+					if (string_at($original, $current, 3, array('CIO','CIE','CIA'))){
+						$primary   .= 'S';
+						$secondary .= 'X';
+					} else {
+						$primary   .= 'S';
+						$secondary .= 'S';
+					}
+					$current += 2;
+					break;
+				}
+
+				// else
+				$primary   .= 'K';
+				$secondary .= 'K';
+
+				// name sent in 'mac caffrey', 'mac gregor'
+				if (string_at($original, $current + 1, 2, array(' C',' Q',' G'))){
+					$current += 3;
+				} else {
+					if (string_at($original, $current + 1, 1, array('C','K','Q'))
+					 && !string_at($original, $current + 1, 2, array('CE','CI'))
+					){
+						$current += 2;
+					} else {
+						++$current;
+					}
+				}
+				break;
+
+			case 'D':
+				if (string_at($original, $current, 2, array('DG'))){
+					if (string_at($original, $current + 2, 1, array('I','E','Y'))){
+						// e.g. 'edge'
+						$primary   .= 'J';
+						$secondary .= 'J';
+						$current += 3;
+						break;
+					} else {
+						// e.g. 'edgar'
+						$primary   .= 'TK';
+						$secondary .= 'TK';
+						$current += 2;
+						break;
+					}
+				}
+
+				if (string_at($original, $current, 2, array('DT','DD'))){
+					$primary   .= 'T';
+					$secondary .= 'T';
+					$current += 2;
+					break;
+				}
+
+				// else
+				$primary   .= 'T';
+				$secondary .= 'T';
+				++$current;
+				break;
+
+			case 'F':
+				if (substr($original, $current + 1, 1) == 'F'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'F';
+				$secondary .= 'F';
+				break;
+
+			case 'G':
+				if (substr($original, $current + 1, 1) == 'H'){
+					if ($current > 0
+					 && !is_vowel($original, $current - 1)
+					){
+						$primary   .= 'K';
+						$secondary .= 'K';
+						$current += 2;
+						break;
+					}
+
+					if ($current < 3){
+						// 'ghislane', 'ghiradelli'
+						if ($current == 0){
+							if (substr($original, $current + 2, 1) == 'I'){
+								$primary   .= 'J';
+								$secondary .= 'J';
+							} else {
+								$primary   .= 'K';
+								$secondary .= 'K';
+							}
+							$current += 2;
+							break;
+						}
+					}
+
+					// Parker's rule (with some further refinements) - e.g. 'hugh'
+					if ((
+							$current > 1
+						 && string_at($original, $current - 2, 1, array('B','H','D'))
+						)
+					// e.g. 'bough'
+					 || (
+							$current > 2
+						 && string_at($original, $current - 3, 1, array('B','H','D'))
+						)
+					// e.g. 'broughton'
+					 || (
+							$current > 3
+						 && string_at($original, $current - 4, 1, array('B','H'))
+						)
+					){
+						$current += 2;
+						break;
+					} else {
+						// e.g. 'laugh', 'McLaughlin', 'cough', 'gough', 'rough', 'tough'
+						if ($current > 2
+						 && substr($original, $current - 1, 1) == 'U'
+						 && string_at($original, $current - 3, 1,array('C','G','L','R','T'))
+						){
+							$primary   .= 'F';
+							$secondary .= 'F';
+						} else if (
+							$current > 0
+						 && substr($original, $current - 1, 1) != 'I'
+						){
+							$primary   .= 'K';
+							$secondary .= 'K';
+						}
+						$current += 2;
+						break;
+					}
+				}
+
+				if (substr($original, $current + 1, 1) == 'N'){
+					if ($current == 1
+					 && is_vowel($original, 0)
+					 && !Slavo_Germanic($original)
+					){
+						$primary   .= 'KN';
+						$secondary .= 'N';
+					} else {
+						// not e.g. 'cagney'
+						if (!string_at($original, $current + 2, 2, array('EY'))
+						 && substr($original, $current + 1) != 'Y'
+						 && !Slavo_Germanic($original)
+						){
+							$primary   .= 'N';
+							$secondary .= 'KN';
+						} else {
+							$primary   .= 'KN';
+							$secondary .= 'KN';
+						}
+					}
+					$current += 2;
+					break;
+				}
+
+				// 'tagliaro'
+				if (string_at($original, $current + 1, 2,array('LI'))
+				 && !Slavo_Germanic($original)
+				){
+					$primary   .= 'KL';
+					$secondary .= 'L';
+					$current += 2;
+					break;
+				}
+
+				// -ges-, -gep-, -gel- at beginning
+				if ($current == 0
+				 && (
+						substr($original, $current + 1, 1) == 'Y'
+					 || string_at($original, $current + 1, 2, array('ES','EP','EB','EL','EY','IB','IL','IN','IE','EI','ER'))
+					)
+				){
+					$primary   .= 'K';
+					$secondary .= 'J';
+					$current += 2;
+					break;
+				}
+
+				// -ger-, -gy-
+				if ((
+						string_at($original, $current + 1, 2,array('ER'))
+					 || substr($original, $current + 1, 1) == 'Y'
+					)
+				 && !string_at($original, 0, 6, array('DANGER','RANGER','MANGER'))
+				 && !string_at($original, $current -1, 1, array('E', 'I'))
+				 && !string_at($original, $current -1, 3, array('RGY','OGY'))
+				){
+					$primary   .= 'K';
+					$secondary .= 'J';
+					$current += 2;
+					break;
+				}
+
+				// italian e.g. 'biaggi'
+				if (string_at($original, $current + 1, 1, array('E','I','Y'))
+				 || string_at($original, $current -1, 4, array('AGGI','OGGI'))
+				){
+					// obvious germanic
+					if ((
+							string_at($original, 0, 4, array('VAN ', 'VON '))
+						 || string_at($original, 0, 3, array('SCH'))
+						)
+					 || string_at($original, $current + 1, 2, array('ET'))
+					){
+						$primary   .= 'K';
+						$secondary .= 'K';
+					} else {
+						// always soft if french ending
+						if (string_at($original, $current + 1, 4, array('IER '))){
+							$primary   .= 'J';
+							$secondary .= 'J';
+						} else {
+							$primary   .= 'J';
+							$secondary .= 'K';
+						}
+					}
+					$current += 2;
+					break;
+				}
+
+				if (substr($original, $current +1, 1) == 'G'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+
+				$primary   .= 'K';
+				$secondary .= 'K';
+				break;
+
+			case 'H':
+				// only keep if first & before vowel or btw. 2 vowels
+				if ((
+						$current == 0
+					 || is_vowel($original, $current - 1)
+					)
+				  && is_vowel($original, $current + 1)
+				){
+					$primary   .= 'H';
+					$secondary .= 'H';
+					$current += 2;
+				} else {
+					++$current;
+				}
+				break;
+
+			case 'J':
+				// obvious spanish, 'jose', 'san jacinto'
+				if (string_at($original, $current, 4, array('JOSE'))
+				 || string_at($original, 0, 4, array('SAN '))
+				){
+					if ((
+							$current == 0
+						 && substr($original, $current + 4, 1) == ' '
+						)
+					 || string_at($original, 0, 4, array('SAN '))
+					){
+						$primary   .= 'H';
+						$secondary .= 'H';
+					} else {
+						$primary   .= 'J';
+						$secondary .= 'H';
+					}
+					++$current;
+					break;
+				}
+
+				if ($current == 0
+				 && !string_at($original, $current, 4, array('JOSE'))
+				){
+					$primary   .= 'J';  // Yankelovich/Jankelowicz
+					$secondary .= 'A';
+				} else {
+					// spanish pron. of .e.g. 'bajador'
+					if (is_vowel($original, $current - 1)
+					 && !Slavo_Germanic($original)
+					 && (
+							substr($original, $current + 1, 1) == 'A'
+						 || substr($original, $current + 1, 1) == 'O'
+						)
+					){
+						$primary   .= 'J';
+						$secondary .= 'H';
+					} else {
+						if ($current == $last){
+							$primary   .= 'J';
+							// $secondary .= '';
+						} else {
+							if (!string_at($original, $current + 1, 1, array('L','T','K','S','N','M','B','Z'))
+							 && !string_at($original, $current - 1, 1, array('S','K','L'))
+							){
+								$primary   .= 'J';
+								$secondary .= 'J';
+							}
+						}
+					}
+				}
+
+				if (substr($original, $current + 1, 1) == 'J'){ // it could happen
+					$current += 2;
+				} else {
+					++$current;
+				}
+				break;
+
+			case 'K':
+				if (substr($original, $current + 1, 1) == 'K'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'K';
+				$secondary .= 'K';
+				break;
+
+			case 'L':
+				if (substr($original, $current + 1, 1) == 'L'){
+					// spanish e.g. 'cabrillo', 'gallegos'
+					if ((
+							$current == ($length - 3)
+						 && string_at($original, $current - 1, 4, array('ILLO','ILLA','ALLE'))
+						)
+					 || (
+							(
+								string_at($original, $last-1, 2, array('AS','OS'))
+							 || string_at($original, $last, 1, array('A','O'))
+							)
+						 && string_at($original, $current - 1, 4, array('ALLE'))
+						)
+					){
+						$primary   .= 'L';
+						// $secondary .= '';
+						$current += 2;
+						break;
+					}
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'L';
+				$secondary .= 'L';
+				break;
+
+			case 'M':
+				if ((
+						string_at($original, $current - 1, 3,array('UMB'))
+					 && (
+							($current + 1) == $last
+						 || string_at($original, $current + 2, 2, array('ER'))
+						)
+					)
+				  // 'dumb', 'thumb'
+				 || substr($original, $current + 1, 1) == 'M'
+				){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'M';
+				$secondary .= 'M';
+				break;
+
+			case 'N':
+				if (substr($original, $current + 1, 1) == 'N'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'N';
+				$secondary .= 'N';
+				break;
+
+			case 'Ã‘':
+				++$current;
+				$primary   .= 'N';
+				$secondary .= 'N';
+				break;
+
+			case 'P':
+				if (substr($original, $current + 1, 1) == 'H'){
+					$current += 2;
+					$primary   .= 'F';
+					$secondary .= 'F';
+					break;
+				}
+
+				// also account for "campbell" and "raspberry"
+				if (string_at($original, $current + 1, 1, array('P','B'))){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'P';
+				$secondary .= 'P';
+				break;
+
+			case 'Q':
+				if (substr($original, $current + 1, 1) == 'Q'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'K';
+				$secondary .= 'K';
+				break;
+
+			case 'R':
+				// french e.g. 'rogier', but exclude 'hochmeier'
+				if ($current == $last
+				 && !Slavo_Germanic($original)
+				 && string_at($original, $current - 2, 2,array('IE'))
+				 && !string_at($original, $current - 4, 2,array('ME','MA'))
+				){
+					// $primary   .= '';
+					$secondary .= 'R';
+				} else {
+					$primary   .= 'R';
+					$secondary .= 'R';
+				}
+				if (substr($original, $current + 1, 1) == 'R'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				break;
+
+			case 'S':
+				// special cases 'island', 'isle', 'carlisle', 'carlysle'
+				if (string_at($original, $current - 1, 3, array('ISL','YSL'))){
+					++$current;
+					break;
+				}
+
+				// special case 'sugar-'
+				if ($current == 0
+				 && string_at($original, $current, 5, array('SUGAR'))
+				){
+					$primary   .= 'X';
+					$secondary .= 'S';
+					++$current;
+					break;
+				}
+
+				if (string_at($original, $current, 2, array('SH'))){
+					// germanic
+					if (string_at($original, $current + 1, 4, array('HEIM','HOEK','HOLM','HOLZ'))){
+						$primary   .= 'S';
+						$secondary .= 'S';
+					} else {
+						$primary   .= 'X';
+						$secondary .= 'X';
+					}
+					$current += 2;
+					break;
+				}
+
+				// italian & armenian 
+				if (string_at($original, $current, 3, array('SIO','SIA'))
+				 || string_at($original, $current, 4, array('SIAN'))
+				){
+					if (!Slavo_Germanic($original)){
+						$primary   .= 'S';
+						$secondary .= 'X';
+					} else {
+						$primary   .= 'S';
+						$secondary .= 'S';
+					}
+					$current += 3;
+					break;
+				}
+
+				// german & anglicisations, e.g. 'smith' match 'schmidt', 'snider' match 'schneider'
+				// also, -sz- in slavic language altho in hungarian it is pronounced 's'
+				if ((
+						$current == 0
+					 && string_at($original, $current + 1, 1, array('M','N','L','W'))
+					)
+				 || string_at($original, $current + 1, 1, array('Z'))
+				){
+					$primary   .= 'S';
+					$secondary .= 'X';
+					if (string_at($original, $current + 1, 1, array('Z'))){
+						$current += 2;
+					} else {
+						++$current;
+					}
+					break;
+				}
+
+			  if (string_at($original, $current, 2, array('SC'))){
+				// Schlesinger's rule 
+				if (substr($original, $current + 2, 1) == 'H')
+					// dutch origin, e.g. 'school', 'schooner'
+					if (string_at($original, $current + 3, 2, array('OO','ER','EN','UY','ED','EM'))){
+						// 'schermerhorn', 'schenker' 
+						if (string_at($original, $current + 3, 2, array('ER','EN'))){
+							$primary   .= 'X';
+							$secondary .= 'SK';
+						} else {
+							$primary   .= 'SK';
+							$secondary .= 'SK';
+						}
+						$current += 3;
+						break;
+					} else {
+						if ($current == 0
+						 && !is_vowel($original, 3)
+						 && substr($original, $current + 3, 1) != 'W'
+						){
+							$primary   .= 'X';
+							$secondary .= 'S';
+						} else {
+							$primary   .= 'X';
+							$secondary .= 'X';
+						}
+						$current += 3;
+						break;
+					}
+
+					if (string_at($original, $current + 2, 1,array('I','E','Y'))){
+						$primary   .= 'S';
+						$secondary .= 'S';
+						$current += 3;
+						break;
+					}
+
+					// else
+					$primary   .= 'SK';
+					$secondary .= 'SK';
+					$current += 3;
+					break;
+				}
+
+				// french e.g. 'resnais', 'artois'
+				if ($current == $last
+				 && string_at($original, $current - 2, 2, array('AI','OI'))
+				){
+					// $primary   .= '';
+					$secondary .= 'S';
+				} else {
+					$primary   .= 'S';
+					$secondary .= 'S';
+				}
+
+				if (string_at($original, $current + 1, 1, array('S','Z'))){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				break;
+
+			case 'T':
+				if (string_at($original, $current, 4, array('TION'))){
+					$primary   .= 'X';
+					$secondary .= 'X';
+					$current += 3;
+					break;
+				}
+
+				if (string_at($original, $current, 3, array('TIA','TCH'))){
+					$primary   .= 'X';
+					$secondary .= 'X';
+					$current += 3;
+					break;
+				}
+
+				if (string_at($original, $current, 2, array('TH'))
+				 || string_at($original, $current, 3, array('TTH'))
+				){
+					// special case 'thomas', 'thames' or germanic
+					if (string_at($original, $current + 2, 2, array('OM','AM'))
+					 || string_at($original, 0, 4, array('VAN ','VON '))
+					 || string_at($original, 0, 3, array('SCH'))
+					){
+						$primary   .= 'T';
+						$secondary .= 'T';
+					} else {
+						$primary   .= '0';
+						$secondary .= 'T';
+					}
+					$current += 2;
+					break;
+				}
+
+				if (string_at($original, $current + 1, 1, array('T','D'))){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'T';
+				$secondary .= 'T';
+				break;
+
+			case 'V':
+				if (substr($original, $current + 1, 1) == 'V'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				$primary   .= 'F';
+				$secondary .= 'F';
+				break;
+
+			case 'W':
+				// can also be in middle of word
+				if (string_at($original, $current, 2, array('WR'))){
+					$primary   .= 'R';
+					$secondary .= 'R';
+					$current += 2;
+					break;
+				}
+
+				if (($current == 0)
+				 && (
+						is_vowel($original, $current + 1)
+					 || string_at($original, $current, 2, array('WH'))
+					)
+				){
+					// Wasserman should match Vasserman 
+					if (is_vowel($original, $current + 1)){
+						$primary   .= 'A';
+						$secondary .= 'F';
+					} else {
+						// need Uomo to match Womo 
+						$primary   .= 'A';
+						$secondary .= 'A';
+					}
+				}
+
+				// Arnow should match Arnoff
+				if ((
+						$current == $last
+					&& is_vowel($original, $current - 1)
+					)
+				 || string_at($original, $current - 1, 5, array('EWSKI','EWSKY','OWSKI','OWSKY'))
+				 || string_at($original, 0, 3, array('SCH'))
+				){
+					// $primary   .= '';
+					$secondary .= 'F';
+					++$current;
+					break;
+				}
+
+				// polish e.g. 'filipowicz'
+				if (string_at($original, $current, 4,array('WICZ','WITZ'))){
+					$primary   .= 'TS';
+					$secondary .= 'FX';
+					$current += 4;
+					break;
+				}
+
+				// else skip it
+				++$current;
+				break;
+
+			case 'X':
+				// french e.g. breaux 
+				if (!(
+						$current == $last
+					 && (
+							string_at($original, $current - 3, 3, array('IAU', 'EAU'))
+						 || string_at($original, $current - 2, 2, array('AU', 'OU'))
+						)
+					)
+				){
+					$primary   .= 'KS';
+					$secondary .= 'KS';
+				}
+
+				if (string_at($original, $current + 1, 1, array('C','X'))){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				break;
+
+			case 'Z':
+				// chinese pinyin e.g. 'zhao' 
+				if (substr($original, $current + 1, 1) == 'H'){
+					$primary   .= 'J';
+					$secondary .= 'J';
+					$current += 2;
+					break;
+
+				} else if (
+					string_at($original, $current + 1, 2, array('ZO', 'ZI', 'ZA'))
+				 || (
+						Slavo_Germanic($original)
+					 && (
+							$current > 0
+						 && substr($original, $current - 1, 1) != 'T'
+						)
+					)
+				){
+					$primary   .= 'S';
+					$secondary .= 'TS';
+				} else {
+					$primary   .= 'S';
+					$secondary .= 'S';
+				}
+
+				if (substr($original, $current + 1, 1) == 'Z'){
+					$current += 2;
+				} else {
+					++$current;
+				}
+				break;
+
+			default:
+				++$current;
+
+		} // end switch
+
+	} // end while
+
+	// printf("<br />ORIGINAL:   %s\n", $original);
+	// printf("<br />current:    %s\n", $current);
+	// printf("<br />PRIMARY:    %s\n", $primary);
+	// printf("<br />SECONDARY:  %s\n", $secondary);
+
+	$primary = substr($primary, 0, 4);
+	$secondary = substr($secondary, 0, 4);
+
+	if( $primary == $secondary ){
+		$secondary = NULL;
+	}
+
+	return array(
+				'primary'	=> $primary,
+				'secondary'	=> $secondary
+				);
+
+} // end of function MetaPhone
+
+
+/**
+ * Name:	string_at($string, $start, $length, $list)
+ * Purpose:	Helper function for double_metaphone( )
+ * Return:	Bool
+ */
+function string_at($string, $start, $length, $list){
+	if ($start < 0
+	 || $start >= strlen($string)
+	){
+		return 0;
+	}
+
+	foreach ($list as $t){
+		if ($t == substr($string, $start, $length)){
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+
+/**
+ * Name:	is_vowel($string, $pos)
+ * Purpose:	Helper function for double_metaphone( )
+ * Return:	Bool
+ */
+function is_vowel($string, $pos){
+	return preg_match("/[AEIOUY]/", substr($string, $pos, 1));
+}
+
+/**
+ * Name:	Slavo_Germanic($string, $pos)
+ * Purpose:	Helper function for double_metaphone( )
+ * Return:	Bool
+ */
+
+function Slavo_Germanic($string){
+	return preg_match("/W|K|CZ|WITZ/", $string);
 }
 
 ?>

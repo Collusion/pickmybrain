@@ -23,6 +23,9 @@ if ( !is_readable($filepath) )
 	die("error: the settings file is not readable.");
 }
 
+# use default settings as base values
+include_once(realpath(dirname(__FILE__)) . "/settings.php");
+
 # parse the settings file
 if ( $data = parse_ini_file($filepath) )
 {
@@ -54,6 +57,7 @@ if ( $data = parse_ini_file($filepath) )
 	$dialect_processing 	= +$dialect_processing;
 	$separate_alnum 		= +$separate_alnum;
 	$sentiweight 			= +$sentiweight;
+	$keyword_suggestions 	= +$keyword_suggestions;
 	$keyword_stemming 		= +$keyword_stemming;
 	$dialect_matching 		= +$dialect_matching;
 	$quality_scoring 		= +$quality_scoring;

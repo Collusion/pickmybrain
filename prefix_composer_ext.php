@@ -1,12 +1,12 @@
 <?php
 
-/* Copyright (C) 2016 Henri Ruutinen - All Rights Reserved
+/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
  * You may use, distribute and modify this code under the
  * terms of the GNU GPLv3 license
  *
  * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@pickmybra.in
- * or visit: http://www.pickmybra.in
+ * with this file. If not, please write to: henri.ruutinen@gmail.com
+ * or visit: http://www.hollilla.com/pickmybrain
  */
 
 # check input parameters only if process number is not defined at all
@@ -166,7 +166,7 @@ try
 	
 	echo "Prefix composer sql: SELECT token FROM PMBtoktemp$index_suffix $where_sql \n";
 	$delta_values = array();
-	
+
 	while ( $row = $pdo->fetch(PDO::FETCH_ASSOC) ) 
 	{	
 		++$token_total_count;
@@ -192,7 +192,7 @@ try
 				}
 			}
 		}
-		
+
 		# if prefix_mode > 0, prefixing is enabled
 		if ( $prefix_mode ) 
 		{

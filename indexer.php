@@ -1,5 +1,14 @@
 <?php
 
+/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
+ * You may use, distribute and modify this code under the
+ * terms of the GNU GPLv3 license
+ *
+ * You should have received a copy of the GNU GPLv3 license 
+ * with this file. If not, please write to: henri.ruutinen@gmail.com
+ * or visit: http://www.hollilla.com/pickmybrain
+ */
+
 define("MAX_TOKEN_LEN", 40);
 ini_set("display_errors", 1);
 error_reporting(E_ALL);
@@ -34,6 +43,9 @@ require_once("tokenizer_functions.php");
 
 # check if sort is supported
 $enable_ext_sorting = isSortSupported();
+
+# check that table definitions are up-to-date
+check_tables($index_id);
 
 # web crawler
 if ( $index_type == 1 ) 

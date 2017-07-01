@@ -130,8 +130,11 @@ $errors = 0;
 $folder_path 					= realpath(dirname(__FILE__));
 $database_file_path 			= $folder_path . "/db_connection.php";
 $search_file_path 				= $folder_path . "/PMBApi.php";
+$indexer_file_path 				= $folder_path . "/indexer.php";
 $web_tokenizer_file_path 		= $folder_path . "/web_tokenizer.php";
 $db_tokenizer_file_path 		= $folder_path . "/db_tokenizer.php";
+$web_tokenizer_ext_file_path 	= $folder_path . "/web_tokenizer_ext.php";
+$db_tokenizer_ext_file_path 	= $folder_path . "/db_tokenizer_ext.php";
 $tokenizer_functions_file_path 	= $folder_path . "/tokenizer_functions.php";
 $settings_file_path 			= $folder_path . "/settings.php";
 $settings_loader_path			= $folder_path . "/autoload_settings.php";
@@ -186,6 +189,18 @@ if ( !is_readable($search_file_path) )
 }
 
 # 4. test if the document processor file is readable
+if ( !is_readable($indexer_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($indexer_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: indexer file indexer.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 4. test if the document processor file is readable
 if ( !is_readable($web_tokenizer_file_path) )
 {
 	++$errors;
@@ -205,6 +220,30 @@ if ( !is_readable($db_tokenizer_file_path) )
 	
 	echo "<div class='errorbox'>
 			<h3 style='color:#ff0000;'>Error: database document collector/tokenizer file db_tokenizer.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 4. test if the document processor file is readable
+if ( !is_readable($web_tokenizer_ext_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($web_tokenizer_ext_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: web-crawler file web_tokenizer_ext.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 4. test if the document processor file is readable
+if ( !is_readable($db_tokenizer_ext_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($db_tokenizer_ext_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: database document collector/tokenizer file db_tokenizer_ext.php cannot be read.</h3>
 		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
 		  </div>";
 }
@@ -383,18 +422,6 @@ if ( !is_writable($folder_path) )
 			<p>Please chmod the current folder and the settings file for creater permissions.</p>
 		  </div>";
 }
-
-# 8. test if the current directory is writable
-/*
-if ( !is_writable($folder_path . "/settings.php") )
-{
-	++$errors;
-	echo "<div class='errorbox'>
-			<h3 style='color:#ff0000;'>Error: the folder $folder_path is not writable.</h3>
-		  	<p>Pickmybrain must be able to modify the settings file and create temporary files if the PDF indexing is enabled.</p>
-			<p>Please chmod the current folder and the settings file for creater permissions.</p>
-		  </div>";
-}*/
 
 # 9. If there are errors, encourage the user to fix them ! 
 if ( $errors === 1 ) 
@@ -1294,6 +1321,16 @@ else
 	$separate_mode_0 = "checked";
 }
 
+$keyword_suggestions_0 = $keyword_suggestions_0 = "";
+if ( $keyword_suggestions )
+{
+	 $keyword_suggestions_1 = "checked";
+}
+else
+{
+	$keyword_suggestions_0 = "checked";
+}
+
 $stemming_enabled_0 = $stemming_enabled_1 = "";
 if ( $keyword_stemming )
 {
@@ -1951,6 +1988,25 @@ switch ( $innodb_row_format )
    		<input type="radio" name='sentiweight' value='0' <?php echo $sentiweight_0; ?> /> Disabled
         <br />
         <input type="radio" name='sentiweight' value='1' <?php echo $sentiweight_1; ?> /> Enabled
+    </p>
+</div>
+
+<div class='settingsbox'>
+    <h3>Keyword suggestions</h3>
+    <p>
+    	Pickmybrain can automatically suggest better search terms, if the provided keywords seem to be mistyped. 
+        This feature is based on the double metaphone phonetic algorithm and works best with english language. 
+        Operation depends entirely on index specific keywods, but with a certain data set following output is produced: 
+    	<br />
+        <br />
+        Input: <i><b>hellsinki</b></i> &nbsp;&nbsp; Did you mean: <i><b>helsinki</b></i>
+        <br />
+        Input: <i><b>dynamiclly</b></i> &nbsp;&nbsp; Did you mean: <i><b>dynamically</b></i>
+    </p>
+    <p>
+   		<input type="radio" name='keyword_suggestions' value='0' <?php echo $keyword_suggestions_0; ?> /> Disabled
+        <br />
+        <input type="radio" name='keyword_suggestions' value='1' <?php echo $keyword_suggestions_1; ?> /> Enabled 
     </p>
 </div>
 

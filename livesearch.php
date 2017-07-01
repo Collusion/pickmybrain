@@ -19,8 +19,6 @@ livesearch.php
 
 if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 {
-	
-	
 	# calculate how many results can be fitted into the viewport
 	$slots = 4;
 	if ( !empty($_GET["h"]) )
@@ -88,6 +86,13 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 		
 		echo "<div class='result_container'>$pagenumber" . $result["total_matches"]." results ( ".round(ceil($result["query_time"]*1000)/1000, 3)." seconds )</div>";
 
+		if ( !empty($result["did_you_mean"]) )
+		{
+			echo "<div class='suggestions'>
+					did you mean: <a class='cursor' onclick='document.getElementById(\"pmblivesearchinput\").value = this.innerText;pmbsearch(document.getElementById(\"pmblivesearchinput\").value, event, $offset);'>".$result["did_you_mean"]."</a>
+				  </div>";
+		}
+
 		$hidden_data = "";
 		$hidden_title = "";
 		$hidden_onclick = "";
@@ -142,8 +147,7 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 							{
 								$extra_fields .= "<div style='display:none;' name='hiddencontent'>";
 							}
-							
-							$col_val = strip_tags($col_val);
+
 							if ( mb_strlen($col_val) > 94 )
 							{
 								$col_val = $pickmybrain->SearchFocuser($col_val, $_GET["q"]);
@@ -152,6 +156,7 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 							}
 							else
 							{
+								$col_val = strip_tags($col_val);
 								$extra_fields .= "<div class='result_text'>$column => $col_val</div>";
 							}
 						}
@@ -205,6 +210,13 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 	else if ( !empty($result["error"]) )
 	{
 		echo "<div class='errormessage'>Following error message was received: ".$result["error"]."</div>";
+	}
+	else if ( !empty($result["did_you_mean"]) )
+	{
+		echo "<div class='suggestions'>
+				did you mean: <a class='cursor' onclick='document.getElementById(\"pmblivesearchinput\").value = this.innerText;pmbsearch(document.getElementById(\"pmblivesearchinput\").value, event, $offset);'>".$result["did_you_mean"]."</a>
+			  </div>
+			  <div class='errormessage'>Sorry, no results :(</div>";
 	}
 	else
 	{

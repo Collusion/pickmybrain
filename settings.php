@@ -62,6 +62,7 @@ $forgive_keywords	= 1;
 $expansion_limit 	= 32;
 $log_queries	 	= 0;
 $include_original_data = 0;
+$keyword_suggestions = 1;
 
 # general settings
 $data_columns		= array();

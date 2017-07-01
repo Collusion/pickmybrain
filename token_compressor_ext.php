@@ -45,6 +45,7 @@ if ( !is_readable($filepath) )
 }
 
 $PackedIntegers = new PackedIntegers();
+$Metaphones 	= new Metaphones();
 	
 $f = fopen($filepath, "r");
 
@@ -103,6 +104,7 @@ try
 						CREATE TABLE IF NOT EXISTS $target_table (
 						 checksum int(10) unsigned NOT NULL,
 						  token varbinary(40) NOT NULL,
+						  metaphone smallint(5) unsigned DEFAULT 0,
 						  doc_matches int(8) unsigned NOT NULL,
 						  doc_ids mediumblob NOT NULL
 						 ) ENGINE=MYISAM DEFAULT CHARSET=utf8;");	
@@ -121,6 +123,7 @@ try
 						CREATE TABLE IF NOT EXISTS $target_table (
 						 checksum int(10) unsigned NOT NULL,
 						  token varbinary(40) NOT NULL,
+						  metaphone smallint(5) unsigned DEFAULT 0,
 						  doc_matches int(8) unsigned NOT NULL,
 						  doc_ids mediumblob NOT NULL,
 						  PRIMARY KEY (checksum,token)
@@ -343,7 +346,9 @@ try
 		# token_id changes now ! 
 		if ( ($min_token !== 0 && $token !== $min_token) || $last_row ) 
 		{
-			$insert_sql .= ",($min_checksum,".$connection->quote($min_token).",$document_count,".$connection->quote($doc_id_string . $token_data_string).")";
+			$metaphone = $Metaphones->token_to_int16($min_token);
+
+			$insert_sql .= ",($min_checksum,".$connection->quote($min_token).",$metaphone,$document_count,".$connection->quote($doc_id_string . $token_data_string).")";
 			++$x;
 			++$w;
 			
@@ -358,7 +363,7 @@ try
 			{
 				$token_insert_time_start = microtime(true);
 				$insert_sql[0] = " ";
-				$ins = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, doc_ids) VALUES $insert_sql");
+				$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $insert_sql");
 				$token_insert_time += (microtime(true)-$token_insert_time_start);
 				$w = 0;
 				++$insert_counter;
@@ -436,7 +441,7 @@ try
 	{	
 		$token_insert_time_start = microtime(true);
 		$insert_sql[0] = " ";
-		$ins = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, doc_ids) VALUES $insert_sql");
+		$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $insert_sql");
 		$token_insert_time += (microtime(true)-$token_insert_time_start);
 		
 		# reset write buffer
@@ -502,7 +507,7 @@ try
 				if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit ) 
 				{
 					$ins_sql[0] = " ";
-					$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, doc_ids) VALUES $ins_sql");
+					$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $ins_sql");
 					unset($ins_sql);
 					$ins_sql = "";
 					$w = 0;
@@ -516,7 +521,7 @@ try
 					}
 				}
 	
-				$ins_sql .= ",(".$row["checksum"].",".$connection->quote($row["token"]).",".$row["doc_matches"].",".$connection->quote($row["doc_ids"]).")";
+				$ins_sql .= ",(".$row["checksum"].",".$connection->quote($row["token"]).",".$row["metaphone"].",".$row["doc_matches"].",".$connection->quote($row["doc_ids"]).")";
 				++$w;	
 			}
 			
@@ -527,7 +532,7 @@ try
 			if ( !empty($ins_sql) ) 
 			{
 				$ins_sql[0] = " ";
-				$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, doc_matches, doc_ids) VALUES $ins_sql");
+				$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $ins_sql");
 				unset($ins_sql);
 				$ins_sql = "";
 				$insert_counter = 0;
