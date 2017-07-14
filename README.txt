@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   1.04 Release 
-Published: 01.07.2017
+Version:   1.05 Release 
+Published: 14.07.2017
 
 copyright 2015-2017 Henri Ruutinen 
 

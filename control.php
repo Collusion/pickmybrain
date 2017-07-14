@@ -2440,9 +2440,9 @@ catch ( PDOException $e )
    <?php 
   	 echo "<script src='css/init.js'></script>";
    
-   	   $sort_select_values = "<option value='@count'>@count</option>\n";
+   	   $sort_select_values = "<option value='@count'>@count</option>\n<option value='@id'>@id</option>\n";
 	   $group_attribute_values = "";
-	   $group_sort_values = "<option value='@score'>@score</option>\n";
+	   $group_sort_values = "<option value='@score'>@score</option>\n<option value='@id'>@id</option>\n";
 	   
 	   if ( $sentiment_analysis ) 
 	   {

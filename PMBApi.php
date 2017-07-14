@@ -1149,112 +1149,6 @@ class PickMyBrain
 		return false;
 	}
 	
-	private function CreatePrefixes($word)
-	{
-		$prefix_array = array();
-		
-		# dialect processing: remove dialect ( ä, ö, å + etc) from tokens and add as prefix
-		if ( $this->dialect_matching && !empty($this->dialect_find) )
-		{
-			$nodialect = str_replace($this->dialect_find, $this->dialect_replace, $word);
-			if ( $nodialect !== $word ) 
-			{
-				$prefix_array[$nodialect] = 0;
-			}
-		}
-	
-		# if prefix_mode > 0, prefixing is enabled
-		if ( $this->prefix_mode ) 
-		{
-			$min_prefix_len = $this->prefix_length;
-			/*
-			prefix_mode 1 = prefixes
-			prefix_mode 2 = prefixes + postifes
-			prefix_mode 3 = infixes
-			*/
-			
-			$wordlen = mb_strlen($word);
-			if ( $wordlen > $min_prefix_len ) 
-			{
-				if ( $this->prefix_mode === 3 ) 
-				{
-					# infixes
-					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i ) 
-					{
-						for ( $j = 0 ; ($i + $j) <= $wordlen ; ++$j )
-						{
-							$prefix_array[mb_substr($word, $j, $i)] = $wordlen - $i;
-						}
-					}
-				}
-				else if ( $this->prefix_mode === 2 )
-				{
-					# prefixes and postfixes
-					# prefix
-					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
-					{
-						$prefix_array[mb_substr($word, 0, $i)] = $wordlen - $i;
-					}
-					
-					# postfix
-					for ( $i = 1 ; $wordlen-$i >= $min_prefix_len ; ++$i )
-					{
-						$prefix_array[mb_substr($word, $i)] = $i;
-					}
-				}
-				else
-				{
-					# default: prefixes only
-					for ( $i = $wordlen-1 ; $i >= $min_prefix_len ; --$i )
-					{
-						$prefix_array[mb_substr($word, 0, $i)] = $wordlen - $i;
-					}
-				}
-				
-			}
-		}
-		
-		return $prefix_array;	
-	}
-	
-	private function longest_common_substring($words)
-	{
-		$words = array_map('mb_strtolower', array_map('trim', $words));
-		$sort_by_strlen = create_function('$a, $b', 'if (mb_strlen($a) === mb_strlen($b)) { return strcmp($a, $b); } return (mb_strlen($a) < mb_strlen($b)) ? -1 : 1;');
-		usort($words, $sort_by_strlen);
-		// We have to assume that each string has something in common with the first
-		// string (post sort), we just need to figure out what the longest common
-		// string is. If any string DOES NOT have something in common with the first
-		// string, return false.
-		$longest_common_substring = array();
-		$shortest_string = str_split(array_shift($words));
-		while ( sizeof($shortest_string) ) 
-		{
-		  array_unshift($longest_common_substring, '');
-		  foreach ($shortest_string as $ci => $char) 
-		  {
-			foreach ($words as $wi => $word) 
-			{
-			  if ( !strstr($word, $longest_common_substring[0] . $char)) 
-			  {
-				// No match
-				break 2;
-			  } // if
-			} // foreach
-			// we found the current char in each word, so add it to the first longest_common_substring element,
-			// then start checking again using the next char as well
-			$longest_common_substring[0].= $char;
-		  } // foreach
-		  // We've finished looping through the entire shortest_string.
-		  // Remove the first char and start all over. Do this until there are no more
-		  // chars to search on.
-		  array_shift($shortest_string);
-		}
-		// If we made it here then we've run through everything
-		usort($longest_common_substring, $sort_by_strlen);
-		return array_pop($longest_common_substring);
-	}
-	
 	public function Search($query, $offset = 0, $limit = 10)
 	{
 		$this->query_start_time = microtime(true);
@@ -1281,12 +1175,14 @@ class PickMyBrain
 		# create a lookup variable for enabled fields
 		$i = 0;
 		$this->enabled_fields = 0;
+		$all_fields 	      = 0;
 		foreach ( $this->field_weights as $field_score ) 
 		{
 			if ( $field_score > 0 ) 
 			{
 				$this->enabled_fields |= (1 << $i);
 			}
+			$all_fields |= (1 << $i);
 			++$i;
 		}
 		
@@ -1309,7 +1205,7 @@ class PickMyBrain
 		# check that proper attributes have been provided
 		if ( !empty($this->group_attr) )
 		{
-			$combined_attrs = $main_sql_attrs + array("@sentiscore" => 1, "@score" => 1);
+			$combined_attrs = $main_sql_attrs + array("@sentiscore" => 1, "@score" => 1, "@id" => 1);
 			
 			$grouping_attributes = $main_sql_attrs;
 
@@ -1337,7 +1233,7 @@ class PickMyBrain
 		# check that provided attribute is indeed valid
 		if ( !empty($this->sort_attr) )
 		{
-			$combined_attrs = $main_sql_attrs + array("@count" => 1, "@score" => 1);
+			$combined_attrs = $main_sql_attrs + array("@count" => 1, "@score" => 1, "@id" => 1);
 			
 			if ( $this->index_type === 1 ) 
 			{
@@ -2340,7 +2236,7 @@ class PickMyBrain
 			}
 
 			# sorting by external attribute, no keyword order requirements
-			if ( !$exact_mode && $disable_score_calculation && $this->matchmode !== PMB_MATCH_STRICT )
+			if ( !$exact_mode && $disable_score_calculation && $this->matchmode !== PMB_MATCH_STRICT && $this->enabled_fields === $all_fields )
 			{
 				$fast_external_sort = true;
 			}
@@ -2350,7 +2246,7 @@ class PickMyBrain
 			}
 			
 			# sorting by external attribute, keyword order requirements apply
-			if ( $exact_mode && $disable_score_calculation )
+			if ( ($exact_mode || $this->enabled_fields !== $all_fields) && $disable_score_calculation )
 			{
 				$external_sort = true;
 			}
@@ -3153,7 +3049,12 @@ class PickMyBrain
 
 				# external, not internal group sort attr
 				# introduce the column in the mysql query
-				if ( strpos($this->group_sort_attr, "@") === false ) 
+				if ( $this->group_sort_attr === "@id" )
+				{
+					# special case: document id is the sort attribute
+					$group_sort_attr = "";
+				}
+				else if ( strpos($this->group_sort_attr, "@") === false ) 
 				{
 					$group_sort_attr = ",attr_" . $this->group_sort_attr;
 				}
@@ -3227,8 +3128,16 @@ class PickMyBrain
 				}
 				else
 				{
-					# trim external group sort attr to get a proper column name
-					$group_sort_attr = str_replace(",", "", $group_sort_attr);
+					# special case: document id is the group sort attribute
+					if ( $this->group_sort_attr === "@id" )
+					{
+						$group_sort_attr = "ID";
+					}
+					else
+					{
+						# trim external group sort attr to get a proper column name
+						$group_sort_attr = str_replace(",", "", $group_sort_attr);
+					}	
 
 					while ( $row = $grouppdo->fetch(PDO::FETCH_ASSOC) )
 					{
@@ -3402,12 +3311,59 @@ class PickMyBrain
 				unset($temp_groups, $grouper_values, $grouper_sort_values);
 
 			}
+			// special case: results are to be ordered by document id ( and grouping is disabled ) 
+			else if ( $disable_score_calculation && $this->sort_attr === "@id" && $this->groupmode === 1 )
+			{
+				# parse results from the document id list ( for the sql ) 
+				$temp_doc_id_sql[0] = " ";
+				$temp_doc_id_sql = trim($temp_doc_id_sql);
+
+				$value_count 	= substr_count($temp_doc_id_sql, ",") + 1;
+				$temp_ids_len 	= strlen($temp_doc_id_sql);
+				$item_len 		= $temp_ids_len / $value_count;
+				
+				$required_amount = $limit + $offset;
+				$required_len = round($required_amount * $item_len * 1.5);
+				if ( $this->sortdirection === "asc" ) 
+				{
+					# results with smallest ids first
+					$arr = explode(",", substr($temp_doc_id_sql, 0, $required_len));
+					# sort values
+					sort($arr);
+				}
+				else
+				{
+					# results with highest ids
+					$arr = explode(",", substr($temp_doc_id_sql, -$required_len));
+					# sort values
+					rsort($arr);
+				}
+				
+				$arr = array_slice($arr, $offset, $limit);
+				
+				foreach ( $arr as $temp_doc_id ) 
+				{
+					$this->result["matches"][(int)$temp_doc_id] = array();
+				}
+			}
 			else if ( $disable_score_calculation )
 			{
 				$sql_columns = array();
 				
-				$db_sort_column = "attr_".$this->sort_attr;
-				$sql_columns["attr_".$this->sort_attr] = $this->sort_attr;
+				# exception: if sort_attr is @id, replace it with ID
+				$replace_count = 0;
+				$this->sort_attr = str_replace("@id", "ID", $this->sort_attr, $replace_count);
+				
+				if ( !$replace_count )
+				{
+					$db_sort_column = "attr_".$this->sort_attr;
+					$sql_columns["attr_".$this->sort_attr] = $this->sort_attr;
+				}
+				else
+				{
+					$db_sort_column = $this->sort_attr;
+					$sql_columns[$this->sort_attr] = $this->sort_attr;
+				}
 				
 				if ( $this->groupmode > 1 ) 
 				{
@@ -3462,7 +3418,6 @@ class PickMyBrain
 				
 				if ( !isset($filtering_done) && !empty($filter_by_sql) )
 				{
-	
 					$temp_sql = "";
 					foreach ( $this->temp_matches as $doc_id => $score ) 
 					{
@@ -3503,37 +3458,52 @@ class PickMyBrain
 				}
 				else if ( !empty($this->sort_attr) && !empty($this->sortdirection) && $this->sort_attr !== $this->group_sort_attr )
 				{
-					# results need to be sorted with an external attribute, even if they have been grouped before this
-					$temp_sql = "";
-					foreach ( $this->temp_matches as $doc_id => $score ) 
+					if ( $this->sort_attr === "@id" )
 					{
-						$temp_sql .= ",$doc_id";
+						# just sort the results ! 
+						if ( $this->sortdirection === "asc" )
+						{
+							ksort($this->temp_matches);
+						}
+						else
+						{
+							krsort($this->temp_matches);
+						}
 					}
-					$temp_sql[0] = " ";
-					
-					$sort_field_name = "attr_" . $this->sort_attr;
-					$wanted_item_count = $offset+$limit;
-
-					$this->db_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
-					$sortsql = "SELECT ID, $sort_field_name FROM PMBDocinfo WHERE ID IN ($temp_sql) ORDER BY $sort_field_name " . $this->sortdirection  . " LIMIT $offset, $limit" ;
-					$sortpdo = $this->db_connection->query(str_replace($find, $repl, $sortsql));	
-					unset( $sortsql, $temp_sql, $t_matches);
-					
-					# reset offset so the results wont be cut later
-					$offset = 0;
-
-					# resultcount needs to be recalculated
-					while ( $row = $sortpdo->fetch(PDO::FETCH_ASSOC) )
+					else
 					{
-						$grouper_sort_values[(int)$row["ID"]] = (int)$row[$sort_field_name];
-						$t_matches[(int)$row["ID"]] = $this->temp_matches[(int)$row["ID"]]; # copy the scores
+						# results need to be sorted with an external attribute, even if they have been grouped before this
+						$temp_sql = "";
+						foreach ( $this->temp_matches as $doc_id => $score ) 
+						{
+							$temp_sql .= ",$doc_id";
+						}
+						$temp_sql[0] = " ";
+						
+						$sort_field_name = "attr_" . $this->sort_attr;
+						$wanted_item_count = $offset+$limit;
+	
+						$this->db_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+						$sortsql = "SELECT ID, $sort_field_name FROM PMBDocinfo WHERE ID IN ($temp_sql) ORDER BY $sort_field_name " . $this->sortdirection  . " LIMIT $offset, $limit" ;
+						$sortpdo = $this->db_connection->query(str_replace($find, $repl, $sortsql));	
+						unset( $sortsql, $temp_sql, $t_matches);
+						
+						# reset offset so the results wont be cut later
+						$offset = 0;
+	
+						# resultcount needs to be recalculated
+						while ( $row = $sortpdo->fetch(PDO::FETCH_ASSOC) )
+						{
+							$grouper_sort_values[(int)$row["ID"]] = (int)$row[$sort_field_name];
+							$t_matches[(int)$row["ID"]] = $this->temp_matches[(int)$row["ID"]]; # copy the scores
+						}
+	
+						$sortpdo->closeCursor();
+						$this->db_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+						
+						$this->temp_matches = $t_matches;
+						unset($t_matches);
 					}
-
-					$sortpdo->closeCursor();
-					$this->db_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
-					
-					$this->temp_matches = $t_matches;
-					unset($t_matches);
 					
 					# results are already ordered by an external attribute
 					$skip_sorting = true;	

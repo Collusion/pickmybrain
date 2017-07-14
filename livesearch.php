@@ -55,7 +55,7 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 			$pickmybrain->SetSortMode((int)$_GET["sort"]);
 		}
 	}
-	
+
 	# groupmode
 	if ( isset($_GET["group"]) )
 	{
@@ -91,6 +91,11 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 			echo "<div class='suggestions'>
 					did you mean: <a class='cursor' onclick='document.getElementById(\"pmblivesearchinput\").value = this.innerText;pmbsearch(document.getElementById(\"pmblivesearchinput\").value, event, $offset);'>".$result["did_you_mean"]."</a>
 				  </div>";
+		}
+		
+		if ( !empty($result["error"]) )
+		{
+			echo "<div class='errormessage'>Following error message was received: ".$result["error"]."</div>";
 		}
 
 		$hidden_data = "";
@@ -140,12 +145,13 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 				/* database index */
 				echo "<div class='result_container $hidden_data' $hidden_title $hidden_onclick>
 						<div class='result_title '>document_id: $doc_id</div>";
-						
+						$extra_field_printed = false;
 						foreach ( $row as $column => $col_val ) 
 						{
-							if ( $col_val == $doc_id ) 
+							if ( $col_val == $doc_id && !$extra_field_printed ) 
 							{
 								$extra_fields .= "<div style='display:none;' name='hiddencontent'>";
+								$extra_field_printed = true;
 							}
 
 							if ( mb_strlen($col_val) > 94 )
