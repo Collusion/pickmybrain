@@ -120,7 +120,7 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 
 		foreach ( $result["matches"] as $doc_id => $row ) 
 		{
-			if ( isset($row["title"]) && isset($row["URL"]) )
+			if ( isset($row["title"]) && isset($row["URL"]) && isset($row["content"]) )
 			{	
 				/* web-index */
 			
@@ -131,11 +131,14 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 				}
 
 				$compactlink = $pickmybrain->CompactLink($row["URL"], 90);
-				
+
+				# focus the main content
+				$row["content"] = $pickmybrain->SearchFocuser($row["content"], $_GET["q"], "fi", 70);
+
 				echo "<div class='result_container'>
 						<a class='result_title' href='".$row["URL"]."'>".$row["title"]."</a>
 						<div class='result_url'>$compactlink</div>
-						<div class='result_text'>".$row["content"]."</div>
+						<div class='result_text'>" . $row["content"] . "</div>
 					  </div>
 						";
 			}

@@ -38,6 +38,7 @@ if ( $data = parse_ini_file($filepath) )
  		$honor_nofollows	= +$honor_nofollows;
  		$use_localhost		= +$use_localhost;
  		$index_pdfs			= +$index_pdfs;
+		$scan_depth			= +$scan_depth;
 	}
 	else
 	{

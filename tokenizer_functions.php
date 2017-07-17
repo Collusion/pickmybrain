@@ -970,6 +970,7 @@ function write_settings(array $settings, $index_id = 0)
 			}
 			break;
 			
+			case 'scan_depth':
 			case 'ranged_query_value':
 			if ( isset($setting_value) && is_numeric($setting_value) && $setting_value >= 0 && $setting_value <= 10000000 )
 			{
@@ -1531,6 +1532,7 @@ function write_settings(array $settings, $index_id = 0)
 allow_subdomains		= $allow_subdomains
 honor_nofollows			= $honor_nofollows
 use_localhost			= $use_localhost
+scan_depth			= $scan_depth
 custom_address			= \"$custom_address\"
 url_keywords			= \"$url_keywords\"
 index_pdfs			= $index_pdfs

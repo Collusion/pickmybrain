@@ -1855,7 +1855,7 @@ class PickMyBrain
 			while ( $row = $tokpdo->fetch(PDO::FETCH_ASSOC) )
 			{	
 				$row["ID"] = $row["token"];
-			
+
 				# an exact match 
 				if ( $row["type"] == 0 && empty($dialect_tokens[$row["token"]]) ) 
 				{
@@ -3584,13 +3584,11 @@ class PickMyBrain
 			{	
 				$ext_docinfo_start = microtime(true);
 			
-				$docsql		= "SELECT ID as doc_id, SUBSTRING(field0, 1, 150) AS title, URL, field1 AS content FROM PMBDocinfo".$this->suffix." WHERE ID IN (".implode(",", array_keys($this->result["matches"])).")";
+				$docsql		= "SELECT ID as doc_id, SUBSTRING(field0, 1, 150) AS title, URL, field1 AS content, field3 as meta FROM PMBDocinfo".$this->suffix." WHERE ID IN (".implode(",", array_keys($this->result["matches"])).")";
 				$docpdo 	= $this->db_connection->query($docsql);
 
 				while ( $row = $docpdo->fetch(PDO::FETCH_ASSOC) )
 				{
-					$row["content"] = $this->SearchFocuser($row["content"], $query, "fi", 40);
-
 					# merge with existing rows
 					foreach ( $row as $column => $column_value ) 
 					{

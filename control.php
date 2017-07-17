@@ -1577,6 +1577,19 @@ switch ( $innodb_row_format )
     </p>
 </div>
 
+<div class='settingsbox' <?php echo $web_visibility; ?> >
+	<h3>Scan depth</h3>
+    <p>
+    	When indexer discovers links from pages defined as seed urls, it will store and eventually index them as well. This setting controls how deep the link discovery is allowed to go.
+    </p>
+    <p>
+    	Example values: 0 = disabled ( infinite depth ), 1 = only seed urls ( no links will be followed ), 2 = seed urls + pages they link directly to etc.
+    </p>
+    <p>
+   		<input type="text" name="scan_depth" style="width:100px;" value="<?php echo $scan_depth; ?>"/> scan depth
+    </p>
+</div>
+
 <div class='settingsbox' <?php echo $db_visibility; ?>>
 	<h3>Target database</h3>
     <p>

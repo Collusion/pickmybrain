@@ -21,6 +21,7 @@ $update_interval 	= 1440;
 $allow_subdomains	= 0;
 $honor_nofollows	= 1;
 $use_localhost		= 0;
+$scan_depth			= 0;
 $custom_address		= "";
 $use_internal_db	= 1;
 $main_sql_query		= "";

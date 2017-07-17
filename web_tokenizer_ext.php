@@ -55,6 +55,9 @@ $blend_chars_space[] = "&#13";
 
 $found_urls = array();
 
+# xml elements that are to be completele removed
+$unwanted_elements = array("script", "style", "select");
+
 $unwanted_characters_plain_text = array("\r\n", "\n\r", "\t", "\n", "\r", "&#13;");
 $a_parents["p"] = 1;
 $a_parents["i"] = 1;
@@ -349,6 +352,7 @@ try
 			# hack: replace wildcard subdomains * with www
 			$seed_url = str_replace("/*.", "/www.", $seed_url);
 			$url_list[] = $seed_url;
+			$depth_list[] = 1;
 			$checked_urls[pack("H*", md5($seed_url))] = 1;
 			
 			# create local versions of seed urls
@@ -491,11 +495,20 @@ $connection->beginTransaction();
 
 while ( !empty($url_list[$lp]) )
 {	
-	$catpointer = 0;
-	$category_ids = array(NULL); 	# reset categories
-	$url = $url_list[$lp];
+	$catpointer 	= 0;
+	$category_ids 	= array(NULL); 	# reset categories
+	$url 			= $url_list[$lp];
+	$current_depth 	= $depth_list[$lp];
+	$next_depth     = $current_depth + 1;
+	
 	++$lp;  # advance the array pointer by one
 	++$documents;
+	
+	if ( $scan_depth && $current_depth > $scan_depth )
+	{
+		$log .= "depth out of bounds for $url ($current_depth > $scan_depth)\n";
+		continue;
+	}
 	
 	# get a combination checksum for subdomain and domain
 	$domain_info = getDomainInfo($url, $suffix_list);
@@ -508,7 +521,7 @@ while ( !empty($url_list[$lp]) )
 	$domain_checksum = crc32(mb_strtolower($url_domain));
 	
 	# free some memory ( remove the last entry from the url_list )
-	unset($url_list[$lp-1]);
+	unset($url_list[$lp-1], $depth_list[$lp-1]);
 	
 	$log .= "processing: $url \n";
 	
@@ -687,8 +700,11 @@ while ( !empty($url_list[$lp]) )
 			{
 				# update the url
 				$url_copy = $url;
-				$url = $redirections[0];
+				$url = $redirections[0];	
 			}
+			
+			$checked_urls[pack("H*", md5($url_copy))] = 1;
+			$checked_urls[pack("H*", md5($url))] = 1;
 			
 			# check again if keyword conditions are met
 			if ( !keyword_check($url, $wanted_keywords, $non_wanted_keywords) )
@@ -772,34 +788,25 @@ while ( !empty($url_list[$lp]) )
 			}
 		}
 		
-		# first, remove all script tags
-		$scripts = $dom->getElementsByTagName("script");
-		
-		if ( !empty($scripts) && $scripts->length > 0 ) 
+		if ( !empty($unwanted_elements) )
 		{
-			$log .= "found " . $scripts->length ." script nodes \n";
-			
-			foreach ( $scripts as $script ) 
+			foreach ( $unwanted_elements as $unwanted_elem ) 
 			{
-				$script->parentNode->removeChild($script);
-				++$removes;
+				$scripts = $dom->getElementsByTagName($unwanted_elem);
+				
+				if ( !empty($scripts) && $scripts->length > 0 ) 
+				{
+					$log .= "found " . $scripts->length ." $unwanted_elem nodes \n";
+					
+					foreach ( $scripts as $script ) 
+					{
+						$script->nodeValue = "";
+						++$removes;
+					}
+				}
 			}
 		}
-		
-		# remove all style tags
-		$styles = $dom->getElementsByTagName("style");
-		
-		if ( !empty($styles) && $styles->length > 0 ) 
-		{
-			$log .= "found " . $styles->length ." style nodes \n";
-			
-			foreach ( $styles as $style ) 
-			{
-				$style->parentNode->removeChild($style);
-				++$removes;
-			}
-		}
-		
+
 		# does the page have any user defined attribute-categories ?
 		if ( !empty($attr_categories) )
 		{
@@ -827,9 +834,8 @@ while ( !empty($url_list[$lp]) )
 		
 		# reset url arrays
 		$temp_links = array();
-		#$outgoing_links[$url] = array();
 		$remove_links = array();
-			
+	
 		$frames = $dom->getElementsByTagName('iframe');
 		
 		if ( !empty($frames) && $frames->length > 0 ) 
@@ -1051,54 +1057,59 @@ while ( !empty($url_list[$lp]) )
 				}
 			}
 		}
-		
-		# if there are proper links, investigate
-		if ( !empty($temp_links) )
+				
+		#  execute link discovery only if scan depth allows it
+		if ( !$scan_depth || $next_depth <= $scan_depth )
 		{
-			$t_sql = "";
-			foreach ( $temp_links as $bin_md5 => $source ) 
+			# if there are proper links, investigate
+			if ( !empty($temp_links) )
 			{
-				$t_sql .= ",".$connection->quote($bin_md5);
-			}
-			$t_sql[0] = " ";
-			
-			if ( !empty($delta_indexing) && !$clean_slate )
-			{
-				$linksql = "(
-							SELECT url_checksum FROM $docinfo_target_table WHERE url_checksum IN ($t_sql)
-							)
-							UNION ALL
-							(
-							SELECT url_checksum FROM PMBDocinfo$index_suffix WHERE url_checksum IN ($t_sql) AND ID < $min_doc_id
-							)";
-			}
-			else
-			{
-				$linksql = "SELECT url_checksum FROM $docinfo_target_table WHERE url_checksum IN ($t_sql)";
-			}
-
-			try
-			{	
-				$linkpdo = $connection->query($linksql);
-
-				while ( $row = $linkpdo->fetch(PDO::FETCH_ASSOC) )
+				$t_sql = "";
+				foreach ( $temp_links as $bin_md5 => $source ) 
 				{
-					unset($temp_links[$row["url_checksum"]]);
+					$t_sql .= ",".$connection->quote($bin_md5);
+				}
+				$t_sql[0] = " ";
+				
+				if ( !empty($delta_indexing) && !$clean_slate )
+				{
+					$linksql = "(
+								SELECT url_checksum FROM $docinfo_target_table WHERE url_checksum IN ($t_sql)
+								)
+								UNION ALL
+								(
+								SELECT url_checksum FROM PMBDocinfo$index_suffix WHERE url_checksum IN ($t_sql) AND ID < $min_doc_id
+								)";
+				}
+				else
+				{
+					$linksql = "SELECT url_checksum FROM $docinfo_target_table WHERE url_checksum IN ($t_sql)";
 				}
 	
-				if ( !empty($temp_links) )
-				{
-					foreach ( $temp_links as $tmp_link ) 
+				try
+				{	
+					$linkpdo = $connection->query($linksql);
+	
+					while ( $row = $linkpdo->fetch(PDO::FETCH_ASSOC) )
 					{
-						$url_list[] = $tmp_link;
+						unset($temp_links[$row["url_checksum"]]);
+					}
+		
+					if ( !empty($temp_links) )
+					{
+						foreach ( $temp_links as $tmp_link ) 
+						{
+							$url_list[] = $tmp_link;
+							$depth_list[] = $next_depth;
+						}
 					}
 				}
-			}
-			catch ( PDOException $e ) 
-			{
-				echo $e->getMessage();
-				$log .= $e->getMessage();
-				return;
+				catch ( PDOException $e ) 
+				{
+					echo $e->getMessage();
+					$log .= $e->getMessage();
+					return;
+				}
 			}
 		}
 
@@ -1418,12 +1429,13 @@ while ( !empty($url_list[$lp]) )
 		}
 
 		$aw = $awaiting_writes;
-		$docinfo_value_sets[] = "(:id$aw, :url$aw, UNHEX(MD5(:url$aw)), :avgsenti$aw, :field0$aw, :field1$aw, :cat_id$aw,  UNIX_TIMESTAMP(), :d_checksum$aw, UNHEX(:checksum$aw))";
+		$docinfo_value_sets[] = "(:id$aw, :url$aw, UNHEX(MD5(:url$aw)), :avgsenti$aw, :field0$aw, :field1$aw, :field3$aw, :cat_id$aw,  UNIX_TIMESTAMP(), :d_checksum$aw, UNHEX(:checksum$aw))";
 		$cescape[":id$aw"] 			= NULL;
 		$cescape[":url$aw"] 		= $url;
 		$cescape[":avgsenti$aw"] 	= $document_avg_score;
 		$cescape[":field0$aw"] 		= $title_plain_text;
 		$cescape[":field1$aw"] 		= $body_plain_text;
+		$cescape[":field3$aw"] 		= $description;
 		$cescape[":cat_id$aw"] 		= $category_ids[0];
 		$cescape[":d_checksum$aw"] 	= $domain_checksum;	
 		$cescape[":checksum$aw"] 	= $md5_checksum;
@@ -1474,6 +1486,7 @@ while ( !empty($url_list[$lp]) )
 											avgsentiscore,
 											field0, 
 											field1, 
+											field3, 
 											attr_category, 
 											attr_timestamp,
 											attr_domain, 
@@ -1614,6 +1627,7 @@ try
 										avgsentiscore,
 										field0, 
 										field1, 
+										field3,
 										attr_category, 
 										attr_timestamp, 
 										attr_domain,
