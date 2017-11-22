@@ -52,7 +52,7 @@ $Metaphones 	= new Metaphones();
 require "data_partitioner.php";
 
 # launch sister processes here if multiprocessing is turned on! 
-if ( $dist_threads > 1 && $process_number === 0 && empty($temp_disable_multiprocessing) ) 
+if ( $dist_threads > 1 && $process_number === 0 && empty($temp_disable_multiprocessing) && $data_size > 0 ) 
 {
 	# launch sister-processes
 	for ( $x = 1 ; $x < $dist_threads ; ++$x ) 
@@ -108,6 +108,7 @@ try
 						 token varbinary(40) NOT NULL,
 						 metaphone smallint(5) unsigned DEFAULT 0,
 						 doc_matches int(8) unsigned NOT NULL,
+						 max_doc_id int(8) unsigned NOT NULL,
 						 doc_ids mediumblob NOT NULL
 						 ) ENGINE=MYISAM DEFAULT CHARSET=utf8;");	
 	}
@@ -123,10 +124,17 @@ try
 						 token varbinary(40) NOT NULL,
 						 metaphone smallint(5) unsigned DEFAULT 0,
 						 doc_matches int(8) unsigned NOT NULL,
+						 max_doc_id int(8) unsigned NOT NULL,
 						 doc_ids mediumblob NOT NULL,
 						 PRIMARY KEY(checksum, token)
 						 ) ENGINE=INNODB DEFAULT CHARSET=utf8;");
 		
+	}
+	
+	if ( $process_number === 0 && $data_size === 0 ) 
+	{
+		echo "Skipping token compression, nothing to compress! \n";
+		return;
 	}
 
 	$rows = 0;
@@ -357,6 +365,7 @@ try
 									".$connection->quote($oldrow["token"]).",
 									".$oldrow["metaphone"].",
 									".$oldrow["doc_matches"].",
+									".$oldrow["max_doc_id"].",
 									".$connection->quote($oldrow["doc_ids"]).")";
 				++$x;
 				++$w;
@@ -365,7 +374,7 @@ try
 				{				
 					$token_insert_time_start = microtime(true);
 					$insert_sql[0] = " ";
-					$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $insert_sql");
+					$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $insert_sql");
 					$token_insert_time += (microtime(true)-$token_insert_time_start);
 					$w = 0;
 					++$insert_counter;
@@ -395,8 +404,6 @@ try
 				}
 			}
 			
-			
-
 			# if these rows are to be combined
 			if ( $oldrow && $min_checksum == $oldrow["checksum"]  )
 			{
@@ -411,6 +418,7 @@ try
 										".$connection->quote($oldrow["token"]).",
 										".$oldrow["metaphone"].",
 										".($oldrow["doc_matches"]+$document_count).",
+										".$min_doc_id.",
 										".$connection->quote(MergeCompressedData($old_doc_ids, $doc_id_string, $hex_lookup_decode, $hex_lookup_encode) . substr($oldrow["doc_ids"], $pos) . $token_data_string).")";
 					++$combinations;
 					++$x;
@@ -446,6 +454,7 @@ try
 											".$connection->quote($oldrow["token"]).",
 											".$oldrow["metaphone"].",
 											".($oldrow["doc_matches"]+$document_count).",
+											".$min_doc_id.",
 											".$connection->quote(MergeCompressedData($old_doc_ids, $doc_id_string, $hex_lookup_decode, $hex_lookup_encode) . substr($oldrow["doc_ids"], $pos) . $token_data_string).")";
 						++$combinations;
 						++$x;
@@ -467,6 +476,7 @@ try
 												".$connection->quote($min_token).",
 												$metaphone, 
 												$document_count,
+												$min_doc_id,
 												".$connection->quote($doc_id_string . $token_data_string).")";
 							++$x;
 							++$w;
@@ -494,6 +504,7 @@ try
 									".$connection->quote($min_token).",
 									$metaphone,
 									$document_count,
+									$min_doc_id,
 									".$connection->quote($doc_id_string . $token_data_string).")";
 				++$x;
 				++$w;	
@@ -510,7 +521,7 @@ try
 			{				
 				$token_insert_time_start = microtime(true);
 				$insert_sql[0] = " ";
-				$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $insert_sql");
+				$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $insert_sql");
 				$token_insert_time += (microtime(true)-$token_insert_time_start);
 				$w = 0;
 				++$insert_counter;
@@ -589,6 +600,7 @@ try
 							".$connection->quote($row_storage["token"]).",
 							".$row_storage["metaphone"].",
 							".$row_storage["doc_matches"].",
+							".$row_storage["max_doc_id"].",
 							".$connection->quote($row_storage["doc_ids"]).")";
 		unset($row_storage);
 	}
@@ -599,6 +611,7 @@ try
 							".$connection->quote($oldrow["token"]).",
 							".$oldrow["metaphone"].",
 							".$oldrow["doc_matches"].",
+							".$oldrow["max_doc_id"].",
 							".$connection->quote($oldrow["doc_ids"]).")";
 		unset($oldrow);
 	}
@@ -611,6 +624,7 @@ try
 							".$connection->quote($oldrow["token"]).",
 							".$oldrow["metaphone"].",
 							".$oldrow["doc_matches"].",
+							".$oldrow["max_doc_id"].",
 							".$connection->quote($oldrow["doc_ids"]).")";
 		++$x;
 		++$w;
@@ -619,7 +633,7 @@ try
 		{				
 			$token_insert_time_start = microtime(true);
 			$insert_sql[0] = " ";
-			$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $insert_sql");
+			$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $insert_sql");
 			$token_insert_time += (microtime(true)-$token_insert_time_start);
 			$w = 0;
 			++$insert_counter;
@@ -644,7 +658,7 @@ try
 	{
 		$token_insert_time_start = microtime(true);
 		$insert_sql[0] = " ";
-		$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $insert_sql");
+		$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $insert_sql");
 		$token_insert_time += (microtime(true)-$token_insert_time_start);
 		
 		# reset write buffer
@@ -720,7 +734,7 @@ try
 				if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit ) 
 				{
 					$ins_sql[0] = " ";
-					$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, metaphone, doc_matches, doc_ids ) VALUES $ins_sql");
+					$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, metaphone, doc_matches, max_doc_id, doc_ids ) VALUES $ins_sql");
 					unset($ins_sql);
 					$ins_sql = "";
 					$w = 0;
@@ -738,6 +752,7 @@ try
 							".$connection->quote($row["token"]).",
 							".$row["metaphone"].",
 							".$row["doc_matches"].",
+							".$row["max_doc_id"].",
 							".$connection->quote($row["doc_ids"]).")";
 				++$w;	
 			}
@@ -749,7 +764,7 @@ try
 			if ( !empty($ins_sql) ) 
 			{
 				$ins_sql[0] = " ";
-				$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, metaphone, doc_matches, doc_ids ) VALUES $ins_sql");
+				$inspdo = $connection->query("INSERT INTO $target_table ( checksum, token, metaphone, doc_matches, max_doc_id, doc_ids ) VALUES $ins_sql");
 				unset($ins_sql);
 				$ins_sql = "";
 				$insert_counter = 0;
@@ -769,6 +784,7 @@ try
 	# remove the old table and rename the new one
 	$connection->query("DROP TABLE $clean_slate_target");
 	$connection->query("ALTER TABLE $target_table RENAME TO $clean_slate_target");
+	#$connection->query("ALTER TABLE $clean_slate_target ADD INDEX(metaphone, doc_matches)"); # add metaphone index
 		
 	$connection->commit();
 	$drop_end = microtime(true) - $drop_start;

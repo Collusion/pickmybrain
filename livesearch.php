@@ -11,7 +11,7 @@
 
 ini_set("display_errors", 1);
 error_reporting(E_ALL);
-set_time_limit(10);
+set_time_limit(3);
 
 /*
 livesearch.php
@@ -75,16 +75,27 @@ if ( isset($_GET["q"]) && trim($_GET["q"]) !== "" )
 	}
 	
 	$result = $pickmybrain->Search($_GET["q"], $offset, $slots);
-
+	
 	if ( !empty($result["matches"]) )
 	{
+		$about = "";
+		if ( isset($result["approximate_count"]) )
+		{
+			$about = "About";
+		}
+		
 		$pagenumber = "";
 		if ( $offset > 0 )
 		{
 			$pagenumber = "Page " . (round($offset/$slots)+1) . " of ";
+			if ( isset($result["approximate_count"]) )
+			{
+				$about = "";
+				$pagenumber .= " about ";
+			}
 		}
 		
-		echo "<div class='result_container'>$pagenumber" . $result["total_matches"]." results ( ".round(ceil($result["query_time"]*1000)/1000, 3)." seconds )</div>";
+		echo "<div class='result_container'>$about $pagenumber" . $result["total_matches"]." results ( ".round(ceil($result["query_time"]*1000)/1000, 3)." seconds )</div>";
 
 		if ( !empty($result["did_you_mean"]) )
 		{

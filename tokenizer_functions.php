@@ -1763,7 +1763,16 @@ function check_tables($index_id, &$log = "")
 						# metaphone column is missing ! 
 						$log .= "Metaphone column definition is missing, updating table...\n";
 						echo "Metaphone column definition is missing, updating table...\n";
-						$alter_sql = "ALTER TABLE PMBTokens$index_suffix ADD metaphone smallint(5) unsigned DEFAULT 0 AFTER token, ADD INDEX (metaphone, doc_matches)";
+						$alter_sql[] = "ADD metaphone smallint(5) unsigned DEFAULT 0 AFTER token, ADD INDEX (metaphone, doc_matches)";
+					}
+					
+					# if max_doc_id is not defined
+					if ( stripos($data_string, "max_doc_id") === false )
+					{
+						# max_doc_id column is missing ! 
+						$log .= "Maximum document id column definition is missing, updating table...\n";
+						echo "Maximum document id column definition is missing, updating table...\n";
+						$alter_sql[] = "ADD max_doc_id int(8) unsigned NOT NULL AFTER doc_matches";
 					}
 				}
 			}			
@@ -1773,7 +1782,7 @@ function check_tables($index_id, &$log = "")
 		{
 			try
 			{
-				$connection->query($alter_sql);
+				$connection->query("ALTER TABLE PMBTokens$index_suffix " . implode(", ", $alter_sql));
 				
 				echo "PMBTokens$index_suffix table definition updated successfully.\n";
 				$log .= "PMBTokens$index_suffix table definition updated successfully.\n";
@@ -1836,6 +1845,7 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 	 token varbinary(40) NOT NULL,
 	 metaphone smallint(5) unsigned DEFAULT 0,
 	 doc_matches int(8) unsigned NOT NULL,
+	 max_doc_id int(8) unsigned NOT NULL,
 	 doc_ids mediumblob NOT NULL,
 	 PRIMARY KEY (checksum, token),
 	 KEY metaphone (metaphone,doc_matches)

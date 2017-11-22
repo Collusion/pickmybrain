@@ -1034,7 +1034,6 @@ class PickMyBrain
 						# contains expanded matches ( original + all prefix matches )
 						if ( isset($this->final_doc_matches[$original_token]) )
 						{
-							#echo "USING FINAL DOC MATCHES \n";
 							$original_match_count = $this->final_doc_matches[$original_token];
 							$max_matches = $original_match_count;
 						}
@@ -1770,11 +1769,107 @@ class PickMyBrain
 				}
 			}
 			
-			$tic = 0;
-
+			
 			$token_order_rev = array_flip($token_order);
 			ksort($token_order_rev);
-	
+			
+			#$exact_id_required_bits = 0;
+
+			if ( !empty($exact_pairs) )
+			{
+				# we are looking for keywords in certain order
+				$exact_mode = true;
+				
+				foreach ( $exact_pairs as $token_pair => $int ) 
+				{
+					$t_parts = explode(" ", $token_pair);
+					if ( count($t_parts) === 2 )
+					{
+						$pos1 = $token_order_rev[$t_parts[0]];
+						$pos2 = $token_order_rev[$t_parts[1]];
+						
+						if ( $pos1 + 1 === $pos2 )
+						{
+							$exact_ids_lookup[(1 << $pos1) | (1 << $pos2)] = 1;
+						}
+					}
+				}
+			}
+			else
+			{
+				# no certain order required
+				$exact_mode = false;
+			}
+			
+			$disable_score_calculation = false;
+			if ( isset($this->non_scored_sortmodes[$this->sortmode]) && 
+				$this->group_sort_attr 	!== "@score" 				 && 
+				$this->group_sort_attr 	!== "@sentiscore"			 && 
+				$this->sort_attr		!== "@score" ) {
+					
+				$disable_score_calculation = true;
+			}
+			
+			# sorting by external attribute, no keyword order requirements
+			if ( !$exact_mode && $disable_score_calculation && $this->matchmode !== PMB_MATCH_STRICT && $this->enabled_fields === $all_fields )
+			{
+				$fast_external_sort = true;
+			}
+			else
+			{
+				$fast_external_sort = false;
+			}
+			
+			# sorting by external attribute, keyword order requirements apply
+			if ( ($exact_mode || $this->enabled_fields !== $all_fields) && $disable_score_calculation )
+			{
+				$external_sort = true;
+			}
+			else
+			{
+				$external_sort = false;
+			}
+
+			if ( $this->matchmode === PMB_MATCH_STRICT )
+			{
+				$strict_match_cmp_value = 1;	
+			}
+			else
+			{
+				$strict_match_cmp_value = 0;	
+			}
+
+			# special case: if sorting by @id and no grouping is enabled, 
+			if ( $disable_score_calculation && $this->sort_attr === "@id" && $this->groupmode === 1 )
+			{
+				if ( $this->sortdirection === "desc" ) 
+				{
+					# descending order
+					$decode_descend = true;
+				}
+				else
+				{
+					# ascending order
+					$decode_ascend = true;
+				}
+				
+				# in any case, external_sort is true ( score calculation not needed ) 
+				$external_sort = true;
+				
+				# how many results are needed to satisfy the fast sorting mode's requirements
+				$fast_ext_sort_req_count = $offset + $limit;
+				
+				# if we are sorting by internal @id
+				$id_sort_enabled = true;			
+			}
+			else
+			{
+				# default sorting mode is ascending
+				$decode_ascend = true;
+				$fast_ext_sort_req_count = pow(2, 32); # fast sorting is not enabled in this normal mode
+			}
+
+			$tic = 0;			
 			$sumdata = array();
 			$sumcounts = array();
 			$bin_separator = $bin_sep = pack("H*", "80");
@@ -1812,12 +1907,27 @@ class PickMyBrain
 				$token_positions_sql = "SUBSTR(doc_ids FROM LOCATE(:bin_sep, doc_ids)+1) as token_positions";
 			}
 			
+			if ( $fast_external_sort ) 
+			{
+				# no need to return document match position data
+				# just return an empty string
+				$token_positions_sql = "'' AS token_positions";
+			}
+			
+			$max_dox_id_column = "";
+			if ( isset($decode_descend) )
+			{
+				# the max doc id value is needed
+				$max_dox_id_column = "max_doc_id,";
+			}
+			
 			if ( $this->delta_documents > 0 ) 
 			{
 				$token_main_sql = "(
 									SELECT token, 
 									$switch_typecase, 
-									doc_matches, 
+									doc_matches,
+									$max_dox_id_column
 									SUBSTR(doc_ids, 1, LOCATE(:bin_sep, doc_ids)-1) as doc_ids, 
 									$token_positions_sql
 									FROM PMBTokens".$this->suffix." WHERE " . implode(" OR ", $token_sql) . "
@@ -1827,6 +1937,7 @@ class PickMyBrain
 									SELECT token, 
 									$switch_typecase, 
 									doc_matches, 
+									$max_dox_id_column
 									SUBSTR(doc_ids, 1, LOCATE(:bin_sep, doc_ids)-1) as doc_ids, 
 									$token_positions_sql
 									FROM PMBTokens".$this->suffix."_delta WHERE " . implode(" OR ", $token_sql) . "
@@ -1836,7 +1947,8 @@ class PickMyBrain
 			{
 				$token_main_sql = "SELECT token, 
 									$switch_typecase, 
-									doc_matches, 
+									doc_matches,
+									$max_dox_id_column
 									SUBSTR(doc_ids, 1, LOCATE(:bin_sep, doc_ids)-1) as doc_ids, 
 									$token_positions_sql
 									FROM PMBTokens".$this->suffix." WHERE " . implode(" OR ", $token_sql);
@@ -1870,12 +1982,10 @@ class PickMyBrain
 					{
 						$sumdata[$token_order_rev[$row["token"]]] = array();
 						$sumcounts[$token_order_rev[$row["token"]]] = 0;
-						$summatchcounts[$token_order_rev[$row["token"]]] = array();
 					}
 			
 					$sumdata[$token_order_rev[$row["token"]]][] = $row["ID"]; # store as int because exact match
 					$sumcounts[$token_order_rev[$row["token"]]] += $row["doc_matches"]; # store how many doc_matches this token has
-					$summatchcounts[$token_order_rev[$row["token"]]][] = $row["doc_matches"];
 				}
 				# prefix match
 				else
@@ -1892,7 +2002,7 @@ class PickMyBrain
 					}
 					$current_prefix = $prefix_grouper[crc32($row["token"])];
 
-					if ( !empty($exact_words[$current_prefix]) )
+					if ( isset($exact_words[$current_prefix]) )
 					{
 						continue;
 					}
@@ -1915,13 +2025,11 @@ class PickMyBrain
 					{
 						$sumdata[$token_order_rev[$keyword_pairs[$row["token"]]]] = array();
 						$sumcounts[$token_order_rev[$keyword_pairs[$row["token"]]]] = 0;
-						$summatchcounts[$token_order_rev[$keyword_pairs[$row["token"]]]] = array();
 					}
 	
 					# do not overwrite better results ! 
 					$sumdata[$token_order_rev[$keyword_pairs[$row["token"]]]][] = $row["ID"];
 					$sumcounts[$token_order_rev[$keyword_pairs[$row["token"]]]] += $row["doc_matches"];	
-					$summatchcounts[$token_order_rev[$keyword_pairs[$row["token"]]]][] = $row["doc_matches"];
 					
 					++$token_match_count[$keyword_pairs[$row["token"]]];
 				}
@@ -1929,23 +2037,40 @@ class PickMyBrain
 				# score lookup table for fuzzy matches
 				$score_lookup_alt[] 		= (float)$token_score;
 
-				$encoded_data[] 	= $row["doc_ids"];
-				$lengths[] 			= strlen($row["doc_ids"]);
-				$encode_pointers[] 	= 0;
-				$encode_delta[] 	= 1;
-				
-				# document match positions
-				$doc_match_data[] 	= $row["token_positions"];
-				$doc_pos_pointers[] = 0;
-				$avgs[] 			= strlen($row["token_positions"])/+$row["doc_matches"];
-				$doc_lengths[] 		= strlen($row["token_positions"]);
+				$doc_id_data_len 	= strlen($row["doc_ids"]);			# length of document id data
+				$token_pos_data_len	= strlen($row["token_positions"]);  # length of token position data 
+
+				$encoded_data[] 	= $row["doc_ids"]; 					# the actual document id data
+				$doc_match_data[] 	= $row["token_positions"];			# the actual token position data
+					
+				# if we are decoding results in "reverse" mode
+				if ( isset($decode_descend) )
+				{
+					$maximum_doc_ids_vals[] = (int)$row["max_doc_id"];
+					$encode_delta[] 	= (int)$row["max_doc_id"];
+					$encode_pointers[] 	= $doc_id_data_len-1;
+					$doc_pos_pointers[] = $token_pos_data_len;
+					
+					# predecode the first char from docids & token match data
+					$encode_temp_docs[]		= $this->hex_lookup_decode[$row["doc_ids"][$doc_id_data_len-1]]-128;
+				}
+				# if results are decoded in normal mode
+				else
+				{
+					$encode_delta[] 	= 1;
+					$encode_pointers[] 	= 0;
+					$doc_pos_pointers[] = 0;
+					$lengths[] 			= $doc_id_data_len;
+				}
+
+				$avgs[] 			= $token_pos_data_len/+$row["doc_matches"];
+				$doc_lengths[] 		= $token_pos_data_len;
 				$undone_values[]	= 0;
-				
 				$token_list[]		= $row["token"];
-				
+
 				++$tic;
 			}
-			
+
 			foreach ( $token_order_rev as $token => $order_index )
 			{
 				if ( isset($sumcounts[$order_index]) )
@@ -1953,7 +2078,7 @@ class PickMyBrain
 					$this->final_doc_matches[$token] = $sumcounts[$order_index];
 				}
 			}
-
+			
 			# close cursor
 			$tokpdo->closeCursor();
 			
@@ -1961,7 +2086,7 @@ class PickMyBrain
 			$this->db_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
 			
 			$this->result["stats"]["payload_time"] = microtime(true) - $payload_start;
-			
+
 			# keyword suggestions
 			if ( !empty($this->keyword_suggestions) )
 			{
@@ -1998,16 +2123,22 @@ class PickMyBrain
 				if ( count($token_order_rev) !== count($real_token_order) )
 				{
 					$sumdata_new = array();
+					$sumcounts_new = array();
 					foreach ( $real_token_order as $index => $token ) 
 					{
 						if ( isset($token_order_rev[$token])  )
 						{
 							# duplicate results ( get the token db ids )
 							$sumdata_new[] = $sumdata[$token_order_rev[$token]];
+							$sumcounts_new[] = $sumcounts[$token_order_rev[$token]];
 						}
 					}
-					
+
+					# replace old ones
 					$sumdata = $sumdata_new;
+					$sumcounts = $sumcounts_new;
+					
+					unset($sumdata_new, $sumcounts_new);
 				}
 			}
 			
@@ -2033,22 +2164,13 @@ class PickMyBrain
 			
 			$token_pairs = array();			
 			
-			$i = 1;
+			# create a lookup array for tokens ( which group they belong ) 
 			foreach ( $sumcounts as $k_index => $doc_matches ) 
 			{			
 				foreach ( $sumdata[$k_index] as $token_id )
 				{
 					$token_group_lookup[$token_id] = $k_index;
 				}
-				
-				# for exact/strict searchmode
-				$prev_index = $k_index-1;
-				if ( $prev_index >= 0 )
-				{
-					$exact_ids_lookup[(1<<$k_index)|(1<<$prev_index)] = 1;
-				}
-		
-				++$i;
 			}
 
 			# ensure that all provided keywords return results
@@ -2092,7 +2214,7 @@ class PickMyBrain
 					}
 				}
 			}
-			
+					
 			# number of all inputted keywords ( even non-wanted ones )
 			$token_count = count($token_order_rev);
 			
@@ -2141,26 +2263,6 @@ class PickMyBrain
 			$total_matches	 = 0;
 			$tmp_matches 	= 0;
 				
-			if ( !empty($exact_pairs) )
-			{
-				# we are looking for keywords in certain order
-				$exact_mode = true;
-			}
-			else
-			{
-				# no certain order required
-				$exact_mode = false;
-			}
-
-			$disable_score_calculation = false;
-			if ( isset($this->non_scored_sortmodes[$this->sortmode]) && 
-				$this->group_sort_attr 	!== "@score" 				 && 
-				$this->group_sort_attr 	!== "@sentiscore"			 && 
-				$this->sort_attr		!== "@score" ) {
-					
-				$disable_score_calculation = true;
-			}
-			
 			$last_index = $token_count-1;
 			$scored_count = 0;
 			
@@ -2170,9 +2272,23 @@ class PickMyBrain
 			$group_count = count($encoded_data);
 	
 			$t_matches = array();
-			$interval = 10000;
-			$min_doc_id = 0;
-			$max_doc_id = $interval + $min_doc_id;
+			
+			if ( isset($decode_descend) )
+			{		
+				$interval = -10000;
+				$max_doc_id = max($encode_delta)+1;
+				$min_doc_id = $max_doc_id + $interval;
+				$max_doc_id_original = $max_doc_id;
+			}
+			else
+			{
+				# positive interval
+				$interval = 10000;
+				$min_doc_id = 0;
+				$max_doc_id = $interval + $min_doc_id;
+			}
+			
+			
 			$vals = 0;
 			$stop = false;
 			$total_vals = 0;
@@ -2181,7 +2297,7 @@ class PickMyBrain
 				helper variables + micro-optimization :-) 
 			*/ 
 
-			# for BM25 calculation to avoid repetitive function cals
+			# for BM25 calculation to avoid repetitive function calls
 			$IDF_denominator = log(1+$this->documents_in_collection);
 			
 			foreach ( $sumcounts as $s_ind => $scount ) 
@@ -2234,38 +2350,9 @@ class PickMyBrain
 			{
 				$bm25_field_scores[$w_bits] = $weighted_score_lookup[$w_bits]-$value;
 			}
-
-			# sorting by external attribute, no keyword order requirements
-			if ( !$exact_mode && $disable_score_calculation && $this->matchmode !== PMB_MATCH_STRICT && $this->enabled_fields === $all_fields )
-			{
-				$fast_external_sort = true;
-			}
-			else
-			{
-				$fast_external_sort = false;
-			}
 			
-			# sorting by external attribute, keyword order requirements apply
-			if ( ($exact_mode || $this->enabled_fields !== $all_fields) && $disable_score_calculation )
-			{
-				$external_sort = true;
-			}
-			else
-			{
-				$external_sort = false;
-			}
-			
-			# is it enough if only one keyword matches ? 
-			if ( $this->matchmode === PMB_MATCH_ANY ) 
-			{
-				$match_any = true;	
-			}
-			else
-			{
-				$match_any = false;	
-			}
-
 			$group_token_count = array();
+
 			# count how many infixes each token main group haves
 			foreach ( $token_list as $group => $token ) 
 			{
@@ -2278,9 +2365,7 @@ class PickMyBrain
 				
 				++$group_token_count[$token_group];
 			}
-
-			$finished_groups = array();
-					
+		
 			foreach ( $encoded_data as $d_group => $datatata )
 			{
 				$sorted_groups[$d_group] = $token_group_lookup[$token_list[$d_group]];
@@ -2288,578 +2373,23 @@ class PickMyBrain
 			
 			asort($sorted_groups);
 
-			$start = microtime(true);
-			$loop = 0;
-			while ( true ) 
+			$start 				= microtime(true);
+			$loop 				= 0;
+			$total_documents 	= 0;
+
+			if ( isset($decode_ascend) )
 			{
-				$finished = 0;
-				$skipped = 0;
-				$end = 0;
-				++$loop;
+				include("decode_asc.php");
+			}
+			else
+			{
+				include("decode_desc.php");
+			}		
 
-				foreach ( $sorted_groups as $group => $token_group ) 
-				{
-					$group_bits = 1 << $token_group;
-					$encoded_group = $this->hex_lookup_encode[$group];
-					
-					if ( $encode_delta[$group] >= $max_doc_id )  
-					{
-						++$skipped;
-						continue; // skip this group
-					}
-					else if ( $encode_pointers[$group] > $lengths[$group] && !$undone_values[$group] )
-					{
-						/*
-						$finished_main_groups[$token_group][$group] = 1;
-						
-						if ( count($finished_main_groups[$token_group]) >= $group_token_count[$token_group] )
-						{
-							# just for curiosity at this point
-						}*/
-						
-						$finished_groups[$group] = 1;
-						++$skipped;
-						++$end;
-						continue;
-					}
-
-					$delta 			= $encode_delta[$group];
-					$temp 			= 0;
-					$shift 			= 0;
-					$bin_data 		= &$encoded_data[$group];	# reference to document id data
-					$docids_len 	= $lengths[$group];			# length of compressed document id data
-					$i 				= $encode_pointers[$group]; # string pointer of compressed document id data
-					$vals 			= $undone_values[$group];	# how many match position values waiting to be decoded ( for this group )
-					$matchpos_data	= &$doc_match_data[$group];	# reference to keyword match position data
-					$matchpos_len	= $doc_lengths[$group];		# keyword match position data length
-					
-					if ( isset($temp_doc_ids_storage[$group]) )
-					{
-						$temp_doc_ids = $temp_doc_ids_storage[$group];
-					}
-					else
-					{
-						$temp_doc_ids = array();
-					}
-		
-					# reset undone values
-					$undone_values[$group] = 0;
-	
-					// decode first (min) doc_id of each result group
-					for ( ; $i < $docids_len ; ++$i )
-					{
-						if ( ($bits = $this->hex_lookup_decode[$bin_data[$i]]) < 128 ) 
-						{
-							# number is yet to end
-							$temp |= $bits << $shift*7;
-							++$shift;
-						}
-						else
-						{
-							# number ends
-							if ( $shift ) 
-							{
-								$delta = ($temp|($bits-128 << $shift*7))+$delta-1;
-								$shift = 0;
-								$temp = 0;
-							}
-							else
-							{
-								$delta = $bits-129+$delta;
-							}
-
-							if ( $delta <= $max_doc_id )
-							{
-								$temp_doc_ids[$delta] = 1;
-								++$vals;
-	
-								// store value only if we are in the current seek-range
-								if ( isset($t_matches[$delta]) ) 
-								{
-									$t_matches[$delta] |= $group_bits;	
-								}
-								else
-								{
-									$t_matches[$delta] = $group_bits;
-								}
-							}
-							else
-							{
-								++$finished;
-								
-								if ( empty($t_matches_awaiting[$delta][$group]) ) 
-								{
-									$t_matches_awaiting[$delta][$group] = $group_bits;
-								}
-								else
-								{
-									$t_matches_awaiting[$delta][$group] |= $group_bits;
-								}
-
-								break;
-							}
-						}
-					}
-					
-					$encode_delta[$group] = $delta;
-					$encode_pointers[$group] = $i+1;
-
-					if ( $vals && $matchpos_len ) 
-					{
-						$expl_s = microtime(true);
-						
-						$r = 0;
-						$travel = (int)($avgs[$group]*$vals);
-						$p = $doc_pos_pointers[$group]+$travel;
-						if ( $p >= $matchpos_len ) 
-						{
-							$p = $matchpos_len-1;
-							$travel = $matchpos_len-$doc_pos_pointers[$group];
-						}
-						
-						$got = substr_count($doc_match_data[$group], $bin_sep, $doc_pos_pointers[$group], $travel);
-						
-						if ( $got < $vals ) 
-						{
-							$vals = $vals-$got;
-							while ( true ) 
-							{
-								if ( $matchpos_data[$p] === $bin_sep )
-								{
-									++$p;
-									++$r;
-									if ( $r === $vals )
-									{
-										break;
-									}
-								}
-								++$p;
-								if ( $p >= $matchpos_len )
-								{
-									++$p;
-									break;
-								}
-							}
-							--$p;
-						}
-						else 
-						{
-							if ( $got === $vals )
-							{
-								$vals = 1;
-							}
-							else
-							{
-								$vals = $got-$vals+1; 
-							}
-							
-							if ( $matchpos_data[$p] === $bin_sep ) ++$vals;
-							
-							while ( true ) 
-							{
-								if ( $matchpos_data[$p] === $bin_sep )
-								{
-									--$p;
-									++$r;
-									if ( $r === $vals )
-									{
-										break;
-									}
-								}
-								--$p;
-								if ( $p <= 0 )
-								{
-									$p=-1;
-									break;
-								}
-							}
-							++$p;
-						}
-						
-						
-						$a = $p-$doc_pos_pointers[$group];
-						$data = explode($bin_sep, substr($doc_match_data[$group], $doc_pos_pointers[$group], $a));
-						$doc_pos_pointers[$group] = $p+1;
-		
-						$l = 0;
-						foreach ( $temp_doc_ids as $doc_id => $string ) 
-						{
-							if ( !empty($loop_doc_positions[$doc_id]) ) 
-							{
-								$loop_doc_positions[$doc_id] 	.= $bin_sep.$encoded_group.$data[$l];
-							}
-							else
-							{
-								$loop_doc_positions[$doc_id] 	= $encoded_group.$data[$l];
-							}
-							++$l;
-						}
-					
-						unset($temp_doc_ids, $data);
-						$temp_doc_ids_storage[$group] = array();
-						$exp_time = microtime(true)-$expl_s;
-					}
-					
-					# this group is done
-					if ( $i >= $docids_len  )
-					{
-						++$end;
-					}
-				} # <---- foreach group ends 
-						
-				if ( $end >= $group_count ) $stop = true;
-								
-				# all groups have finished, lets check the results
-				if ( $finished >= $group_count || $skipped >= $group_count || $stop ) 
-				{
-					if ( $stop ) 
-					{
-						if ( !empty($t_matches_awaiting) )
-						{
-							foreach ( $t_matches_awaiting as $doc_id => $data ) 
-							{
-								if ( $doc_id >= $min_doc_id && $doc_id <= $max_doc_id )
-								{
-									foreach ( $t_matches_awaiting[$doc_id] as $group => $bits ) 
-									{
-										$undone_values[$group] = 1;
-										$temp_doc_ids_storage[$group][$doc_id] = $bits;
-										
-										if ( !empty($t_matches[$doc_id]) )
-										{
-											$t_matches[$doc_id] |= $bits;
-										}
-										else
-										{
-											$t_matches[$doc_id] = $bits;
-										}
-									}
-									
-									unset($t_matches_awaiting[$doc_id]);
-								}
-							}
-						}
-					}
-					
-					$t = 0;
-
-					# get documents match position data
-					foreach ( $t_matches as $doc_id => $bits ) 
-					{
-						if ( ($bits & $reference_bits) === $goal_bits )
-						{
-							# skip the whole score calculation phase if we are sorting by an external attribute
-							# and there is no strict keyword order lookup
-							if ( $fast_external_sort )
-							{
-								$temp_doc_id_sql .= ",$doc_id";
-								++$tmp_matches;	
-								continue;
-							}
-
-							$match_position_string = &$loop_doc_positions[$doc_id];
-							# now calculate document scores
-							if ( $exact_mode ) 
-							{
-								$exact_ids_lookup_copy = $exact_ids_lookup;
-							}
-							
-							unset($best_match_score, $phrase_data, $document_count, $sentiment_data);
-							
-							$data_len		 	= strlen($loop_doc_positions[$doc_id]);
-							$phrase_score 		= 0;
-							$bm25_score 		= 0;
-							$self_score 		= 0;
-							$maxscore_total 	= 0;
-							$sentiscore			= 0;
-							$position_storage 	= $last_pos_lookup;	
-							$exact_match 		= false;
-						
-							$t_group 	= $this->hex_lookup_decode[$match_position_string[0]];
-							$qind		= $sorted_groups[$t_group];
-							$prev_group = $qind-1;	
-
-							# initialize temporary array variables for each token group
-							$phrase_data[$qind] 		= 0; # for phrase score bits
-							$document_count[$qind] 		= 0; # how many documents for this token group
-							$best_match_score[$qind] 	= $score_lookup_alt[$t_group]; # maxscore ( token quality )
-
-							$temp = 0;
-							$shift = 0;
-							$delta = 1;
-							$x = 0;
-								
-							for ( $i = 1 ; $i < $data_len ; ++$i )
-							{
-								$bits = $this->hex_lookup_decode[$match_position_string[$i]];
-								
-								if ( $bits === 128 )
-								{
-									# increase document match count for the previous token group ( if sentiment analysis is on, decrement the count by one ) 
-									$document_count[$qind] += $x - $this->sentiment_index;
-									
-									# zero, as in binary separator
-									# token changes
-									
-									++$i; # first char will be the group
-									$t_group 	= $this->hex_lookup_decode[$match_position_string[$i]];
-									$qind		= $sorted_groups[$t_group];
-									$prev_group = $qind-1;
-									
-									if ( !isset($best_match_score[$qind]) )
-									{
-										# initialize temporary array variables for each token group
-										$phrase_data[$qind] 		= 0; # for phrase score bits
-										$document_count[$qind] 		= 0; # how many documents for this token group
-										$best_match_score[$qind] 	= 0; # maxscore ( token quality )
-									}
-		
-									# better quality score for this result group
-									if ( $score_lookup_alt[$t_group] > $best_match_score[$qind] )
-									{
-										$best_match_score[$qind] 	= $score_lookup_alt[$t_group];
-									}
-											
-									# reset temporary variables		
-									$temp = 0;
-									$shift = 0;
-									$delta = 1;
-									$x = 0;
-									
-								}
-								else if ( $bits < 128 ) 
-								{
-									# number is yet to end
-									# check also gere if shift is === 0 ( then temp = bits; )
-									$temp |= $bits << $shift*7;
-									++$shift;
-								}
-								else
-								{
-									# 8th bit is set, number ends here ! 
-									
-									if ( $x < $this->sentiment_index )
-									{
-										$sentiscore += ($temp|($bits-128 << $shift*7))-128;
-										$temp = 0;
-										$shift = 0;
-									}
-									else
-									{
-										# otherwise this value is keyword position in document
-										if ( $shift ) 
-										{
-											$delta = ($temp|($bits-128 << $shift*7))+$delta-1;
-											$shift = 0;
-											$temp = 0;
-										}
-										else
-										{
-											$delta = $bits-129+$delta;
-										}
-
-										$field_id_bit = 1 << ($delta & $this->lsbits);
-										
-										if ( $field_id_bit & $this->enabled_fields )
-										{
-											$field_pos = $delta >> $this->field_id_width;
-	
-											# self score match
-											$self_score |= $field_id_bit;
-	
-											# if there is a match in the same field 
-											if ( $position_storage[$field_id_bit][$prev_group] === $field_pos-1 )
-											{
-												$phrase_data[$qind] |= $field_id_bit;
-												
-												if ( $exact_mode ) 
-												{
-													unset($exact_ids_lookup_copy[(1<<$qind)|(1<<$prev_group)]);	
-												}
-											}
-											# if field_pos is 1 and token group is 0 -> exact match
-											else if ( $field_pos+$qind === 1 ) 
-											{
-												$exact_match = true;
-											}
-											
-											$position_storage[$field_id_bit][$qind] = $field_pos;
-										}
-									}
-									
-									++$x;
-								}
-							}
-							
-							if ( !$self_score ) 
-							{
-								# self_score is zero => none of the keywords were found on enabled fields
-								# this document is not a match
-								continue;
-							}
-							
-							$document_count[$qind] += $x - $this->sentiment_index;
-							
-							if ( $exact_mode && !empty($exact_ids_lookup_copy)  )
-							{
-								# exact mode is on but document does not 
-								# satisfy strict keyword order conditions
-								continue;
-							}
-							else if ( $this->matchmode === PMB_MATCH_STRICT && !$exact_match )
-							{
-								# strict matchmode's requirements not satisfied
-								continue;
-							}
-							
-							++$total_matches;
-							
-							# skip rest of the score calculation
-							# documents are ranked by an external attribute
-							if ( $external_sort )
-							{
-								$temp_doc_id_sql .= ",$doc_id";	
-								continue;
-							}
-							
-							foreach ( $phrase_data as $vind => $value ) 
-							{
-								$phrase_score 	+= $weighted_score_lookup[$value];
-								$maxscore_total += $best_match_score[$vind];
-
-								if ( $sentimode && $this->sentiweight ) 
-								{
-									# if field_weights are applied also sentiment scores
-									$sentiscore	+= $bm25_field_scores[$value];
-								}
-		
-								$effective_match_count = $bm25_field_scores[$value] + $document_count[$vind];
-
-								$bm25_score 	+= $effective_match_count * $IDF_lookup[$vind] / ($effective_match_count+1.2);
-							}
-
-							# calculate self_score
-							$final_self_score = $weighted_score_lookup[$self_score];
-							
-							# is quality scoring enabled ? 
-							if ( $this->quality_scoring )
-							{
-								$score_multiplier = $maxscore_total/count($phrase_data);
-							}
-							else
-							{
-								$score_multiplier = 1;
-							}
-							
-							switch ( $this->rankmode )
-							{
-								case PMB_RANK_PROXIMITY_BM25:
-								$this->temp_matches[$doc_id] = (int)((($phrase_score + $final_self_score) * 1000 + round((0.5 + $bm25_score / $bm25_token_count) * 999)) * $score_multiplier);
-								break;
-								
-								case PMB_RANK_BM25:
-								$this->temp_matches[$doc_id] = (int)(round((0.5 + $bm25_score / $bm25_token_count) * 999) * $score_multiplier);
-								break;
-								
-								case PMB_RANK_PROXIMITY:
-								$this->temp_matches[$doc_id] = (int)((($phrase_score + $final_self_score) * 1000) * $score_multiplier);
-								break;
-							}
-							
-							
-							# special case: store sentiment score if sorting/grouping by sentiment score
-							if ( $sentimode )
-							{
-								$this->temp_sentiscores[$doc_id] = $sentiscore;
-							}
-							
-							/*
-							at this point, check how many temp_matches we have
-							if count(temp_matches) > 10000, sort and keep only 1000 best matches
-							*/
-							
-							if ( $total_matches % $this->temp_grouper_size === 0 )
-							{	
-								# sort results
-								arsort($this->temp_matches);
-								
-								/* if grouping is enabled, it should be done at this point*/
-								if ( $this->groupmode > 1 ) 
-								{
-									$this->GroupTemporaryResults();
-								}
-								else
-								{
-									# keep only $this->max_results 
-									$this->temp_matches = array_slice($this->temp_matches, 0, $this->max_results, true);
-								}
-	
-								if ( $sentimode ) 
-								{
-									$t_sentiscores = array();
-									# rewrite sentiment score data
-									foreach ( $this->temp_matches as $t_doc_id => $doc_score ) 
-									{
-										$t_sentiscores[$t_doc_id] = $this->temp_sentiscores[$t_doc_id];
-										unset($this->temp_sentiscores[$t_doc_id]);
-									}
-									$this->temp_sentiscores = $t_sentiscores;
-									unset($t_sentiscores);
-								}
-							}
-							
-						}
-					}
-					
-					$min_doc_id += $interval;
-					$max_doc_id += $interval;
-					
-					unset($t_matches, $loop_doc_groups, $loop_doc_positions);
-					$t_matches = array();
-					$loop_doc_positions = array();
-					$loop_doc_groups = array();
-
-					if ( !empty($t_matches_awaiting) )
-					{
-						foreach ( $t_matches_awaiting as $doc_id => $data ) 
-						{
-							if ( $doc_id >= $min_doc_id && $doc_id <= $max_doc_id )
-							{
-								foreach ( $t_matches_awaiting[$doc_id] as $group => $bits ) 
-								{
-									$undone_values[$group] = 1;
-									$temp_doc_ids_storage[$group][$doc_id] = $bits;
-										
-									if ( !empty($t_matches[$doc_id]) )
-									{
-										$t_matches[$doc_id] |= $bits;
-									}
-									else
-									{
-										$t_matches[$doc_id] = $bits;
-									}
-								}
-									
-								unset($t_matches_awaiting[$doc_id]);
-							}
-							else if ( $doc_id < $min_doc_id )
-							{
-								unset($t_matches_awaiting[$doc_id]);
-							}	
-						}
-					}
-					else if ( $stop ) 
-					{
-						break;
-					}
-				}
-
-			} # <------ while ( true ) ends 
-			
 			unset($loop_doc_positions, $loop_doc_groups, $t_matches, $t_matches_awaiting);
 			
 			if ( $tmp_matches ) $total_matches = $tmp_matches;
-			
+
 			$this->result["stats"]["processing_time"] = microtime(true) - $data_start;
 			$this->result["total_matches"] = $total_matches;
 			
@@ -2868,7 +2398,19 @@ class PickMyBrain
 				# no results
 				return $this->result;
 			}
-		
+			else if ( isset($id_sort_enabled) && !isset($id_sort_goal) )
+			{
+				$max_value = ($tmp_matches > $total_matches) ? $t_matches : $total_matches;
+
+				if ( $max_value <= ($fast_ext_sort_req_count - $limit) )
+				{
+					$this->result["out_of_bounds"] = 1;
+					return $this->result;
+				}
+			}
+			
+			$postprocessing_start = microtime(true);
+
 			/*
 				at this point we know all matching document ids ( - minus filterby )
 				find out all the external attributes ( columns ) that should be fetched
@@ -3313,29 +2855,22 @@ class PickMyBrain
 			}
 			// special case: results are to be ordered by document id ( and grouping is disabled ) 
 			else if ( $disable_score_calculation && $this->sort_attr === "@id" && $this->groupmode === 1 )
-			{
+			{		
 				# parse results from the document id list ( for the sql ) 
 				$temp_doc_id_sql[0] = " ";
 				$temp_doc_id_sql = trim($temp_doc_id_sql);
-
-				$value_count 	= substr_count($temp_doc_id_sql, ",") + 1;
-				$temp_ids_len 	= strlen($temp_doc_id_sql);
-				$item_len 		= $temp_ids_len / $value_count;
-				
 				$required_amount = $limit + $offset;
-				$required_len = round($required_amount * $item_len * 1.5);
+
 				if ( $this->sortdirection === "asc" ) 
 				{
 					# results with smallest ids first
-					$arr = explode(",", substr($temp_doc_id_sql, 0, $required_len));
-					# sort values
+					$arr = explode(",", $temp_doc_id_sql);
 					sort($arr);
 				}
 				else
 				{
-					# results with highest ids
-					$arr = explode(",", substr($temp_doc_id_sql, -$required_len));
-					# sort values
+					# results are in reverse order ( biggest @id first ) 
+					$arr = explode(",", $temp_doc_id_sql);
 					rsort($arr);
 				}
 				
@@ -3579,11 +3114,11 @@ class PickMyBrain
 				}
 			}
 
+			$ext_docinfo_start = microtime(true);
+
 			# fetch docinfo separately
 			if ( $this->index_type == 1 )
 			{	
-				$ext_docinfo_start = microtime(true);
-			
 				$docsql		= "SELECT ID as doc_id, SUBSTRING(field0, 1, 150) AS title, URL, field1 AS content, field3 as meta FROM PMBDocinfo".$this->suffix." WHERE ID IN (".implode(",", array_keys($this->result["matches"])).")";
 				$docpdo 	= $this->db_connection->query($docsql);
 
@@ -3595,8 +3130,6 @@ class PickMyBrain
 						$this->result["matches"][(int)$row["doc_id"]][$column] = $column_value;
 					}
 				}	
-				
-				$this->result["stats"]["ext_docinfo_time"] = microtime(true)-$ext_docinfo_start;
 			}
 			# if user has requested that original  data must be included with the results
 			else if ( $this->include_original_data && !empty($this->sql_body) ) 
@@ -3658,6 +3191,8 @@ class PickMyBrain
 					}
 				}
 			}
+			
+			$this->result["stats"]["ext_docinfo_time"] = microtime(true)-$ext_docinfo_start;
 		}
 		catch ( PDOException $e ) 
 		{

@@ -29,6 +29,9 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 }
 
+# set process state on
+SetProcessState($index_id, $process_number, 1);
+
 register_shutdown_function($shutdown_function);
 
 $suffix_list = array();
@@ -177,7 +180,6 @@ try
 	}
 		
 	# update current indexing state to true ( 1 ) 
-	SetProcessState($index_id, $process_number, 1);
 	SetIndexingState(1, $index_id);
 	
 	$upd_state = $connection->prepare("UPDATE PMBIndexes SET indexing_started = UNIX_TIMESTAMP() WHERE ID = ?");

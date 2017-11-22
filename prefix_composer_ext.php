@@ -59,7 +59,6 @@ if ( $process_number !== 0 )
 	register_shutdown_function("shutdown", $index_id, $process_number);
 }
 
-
 # dialect processing
 if ( $dialect_processing )
 {

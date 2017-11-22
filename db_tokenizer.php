@@ -29,6 +29,9 @@ if ( !isset($process_number) )
 	require_once("tokenizer_functions.php");
 }
 
+# set process state on
+SetProcessState($index_id, $process_number, 1);
+	
 register_shutdown_function($shutdown_function);
 
 define("CHARSET_REGEXP", "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "]/u");
@@ -591,9 +594,6 @@ try
 		}
 	}
 
-	# set process state on
-	SetProcessState($index_id, $process_number, 1);
-	
 	# fetch data from ( external ) database
 	$mainpdo = $ext_connection->query($main_sql_query);	
 }
@@ -881,6 +881,17 @@ while ( true )
 		}
 		
 		$fields[$f_id] = $field;
+	}
+	
+	/*
+		INSERT CUSTOM FUNCTIONS HERE
+	*/
+	if ( !empty($approved_custom_functions) )
+	{
+		foreach ( $approved_custom_functions as $f_name ) 
+		{
+			
+		}
 	}
 	
 	foreach ( $fields as $f_id => $field ) 

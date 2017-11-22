@@ -51,7 +51,7 @@ $PackedIntegers = new PackedIntegers();
 require "data_partitioner.php";
 
 # launch sister processes here if multiprocessing is turned on! 
-if ( $dist_threads > 1 && $process_number === 0 && empty($temp_disable_multiprocessing) ) 
+if ( $dist_threads > 1 && $process_number === 0 && empty($temp_disable_multiprocessing) && $data_size > 0 ) 
 {
 	# launch sister-processes
 	for ( $x = 1 ; $x < $dist_threads ; ++$x ) 
@@ -131,6 +131,15 @@ try
 						 PRIMARY KEY(checksum)
 						 ) ENGINE=INNODB $innodb_row_format_sql");
 		
+	}
+	
+	
+	# if we are at the main process
+	# and there is no data to compress, skip the rest of the file
+	if ( $process_number === 0 && $data_size === 0 ) 
+	{
+		echo "Skipping prefix compression, nothing to compress! \n";
+		return;
 	}
 						
 	$insert_time 			= 0;

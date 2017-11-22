@@ -101,6 +101,7 @@ try
 						  token varbinary(40) NOT NULL,
 						  metaphone smallint(5) unsigned DEFAULT 0,
 						  doc_matches int(8) unsigned NOT NULL,
+						  max_doc_id int(8) unsigned NOT NULL,
 						  doc_ids mediumblob NOT NULL
 						 ) ENGINE=MYISAM DEFAULT CHARSET=utf8;");	
 	}
@@ -109,6 +110,14 @@ try
 		if ( empty($replace_index) && $clean_slate ) 
 		{
 			$target_table = "PMBTokens$index_suffix";
+			try
+			{
+				$connection->query("DROP INDEX metaphone ON $target_table");
+			}
+			catch ( PDOException $e )
+			{
+				
+			}
 		}
 		else
 		{
@@ -120,6 +129,7 @@ try
 						  token varbinary(40) NOT NULL,
 						  metaphone smallint(5) unsigned DEFAULT 0,
 						  doc_matches int(8) unsigned NOT NULL,
+						  max_doc_id int(8) unsigned NOT NULL,
 						  doc_ids mediumblob NOT NULL,
 						  PRIMARY KEY (checksum,token)
 						 ) ENGINE=INNODB DEFAULT CHARSET=utf8;");
@@ -309,7 +319,7 @@ try
 		{
 			$metaphone = $Metaphones->token_to_int16($min_token);
 			
-			$insert_sql .= ",($min_checksum,".$connection->quote($min_token).",$metaphone,$document_count,".$connection->quote($doc_id_string . $token_data_string).")";
+			$insert_sql .= ",($min_checksum,".$connection->quote($min_token).",$metaphone,$document_count,$min_doc_id,".$connection->quote($doc_id_string . $token_data_string).")";
 			++$x;
 			++$w;
 			
@@ -324,7 +334,7 @@ try
 			{
 				$token_insert_time_start = microtime(true);
 				$insert_sql[0] = " ";
-				$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $insert_sql");
+				$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $insert_sql");
 				$token_insert_time += (microtime(true)-$token_insert_time_start);
 				$w = 0;
 				++$insert_counter;
@@ -390,7 +400,7 @@ try
 	{	
 		$token_insert_time_start = microtime(true);
 		$insert_sql[0] = " ";
-		$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $insert_sql");
+		$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $insert_sql");
 		$token_insert_time += (microtime(true)-$token_insert_time_start);
 		
 		# reset write buffer
@@ -458,7 +468,7 @@ try
 			if ( $w >= $write_buffer_len || memory_get_usage() > $memory_usage_limit ) 
 			{
 				$ins_sql[0] = " ";
-				$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $ins_sql");
+				$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $ins_sql");
 				unset($ins_sql);
 				$ins_sql = "";
 				$w = 0;
@@ -472,7 +482,7 @@ try
 				}
 			}
 
-			$ins_sql .= ",(".$row["checksum"].",".$connection->quote($row["token"]).",".$row["metaphone"].",".$row["doc_matches"].",".$connection->quote($row["doc_ids"]).")";
+			$ins_sql .= ",(".$row["checksum"].",".$connection->quote($row["token"]).",".$row["metaphone"].",".$row["doc_matches"].",".$row["max_doc_id"].",".$connection->quote($row["doc_ids"]).")";
 			++$w;	
 		}
 		
@@ -482,7 +492,7 @@ try
 		if ( !empty($ins_sql) ) 
 		{
 			$ins_sql[0] = " ";
-			$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, doc_ids) VALUES $ins_sql");
+			$inspdo = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $ins_sql");
 			unset($ins_sql);
 			$ins_sql = "";
 			$insert_counter = 0;

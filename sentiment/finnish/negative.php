@@ -1,17 +1,17 @@
 <?php
 
-/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
- * You may use, distribute and modify this code under the
- * terms of the GNU GPLv3 license
- *
- * You should have received a copy of the GNU GPLv3 license 
- * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
- */
-
 /* 
 	List of words that have negative attitude
 	For Finnish language
+	
+	All rights reserved. 
+	Distributing, copying and selling this program code is strictly prohibited. 
+	© Henri Ruutinen / PickMyBra.in 2015-2016
+	
+	If for a some reason you came across this file without purchasing it or without 
+	being a part of an organization that purchased it, please visit 
+	http://www.pickmybra.in and notify us.
+	 
 */
 
 $data = array(
@@ -6109,6 +6109,12 @@ $data = array(
 "paska" => 1,
 "paskan" => 1,
 "paskanaama" => 1,
+"paskanaaman" => 1,
+"paskanaamat" => 1,
+"paskanaamoja" => 1,
+"paskanaamoilla" => 1,
+"paskanaamoilta" => 1,
+"paskanaamoille" => 1,
 "paskasitte" => 1,
 "paska-aivo" => 1,
 "paska-aivot" => 1,

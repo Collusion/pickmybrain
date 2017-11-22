@@ -7,7 +7,7 @@ Published: 18.07.2017
 copyright 2015-2017 Henri Ruutinen 
 
 email: henri.ruutinen@gmail.com
-website: http://www.hollilla.com/pickmybrain
+website: http://www.pickmybra.in
 
 
 Overview
@@ -47,7 +47,7 @@ under the GPLv3, or purchase a commercial Pickmybrain source license.
 If you're interested in commercial licensing, please see the Pickmybrain 
 web site:
 
-    http://www.hollilla.com/pickmybrain
+    http://www.pickmybra.in
 
 
 Compatibility
@@ -75,7 +75,7 @@ Getting Pickmybrain
 -------------------
 
 The latest version is available from:
-http://www.hollilla.com/pickmybrain
+http://www.pickmybra.in
 
 
 Installation
