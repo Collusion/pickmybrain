@@ -734,7 +734,10 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 			# each attribute must be found from the main SQL query
 			foreach ( $main_sql_attrs as $attr ) 
 			{
-				if ( strpos($main_sql_copy, $attr) === false )
+				# trim possible data length values
+				$attr_parts = explode(":", $attr);
+				
+				if ( strpos($main_sql_copy, $attr_parts[0]) === false )
 				{
 					$log .= "Error: $attr was defined as an attribute, but no such column exists in the SQL query.\n";
 					++$e_count;
@@ -3304,19 +3307,9 @@ class webRequest
 		$active = null;
 		do 
 		{
-			$mrc = curl_multi_exec($mh, $active);
-		} while ($mrc == CURLM_CALL_MULTI_PERFORM);
-			
-		while ($active && $mrc == CURLM_OK) 
-		{
-			if ( curl_multi_select($mh) != -1 ) 
-			{
-				do 
-				{
-					$mrc = curl_multi_exec($mh, $active);
-				} while ($mrc == CURLM_CALL_MULTI_PERFORM);
-			}
-		}
+			curl_multi_exec($mh, $active);
+			curl_multi_select($mh);
+		} while ( $active > 0 );
 		
 		foreach ($curly as $id => $c) 
 		{
