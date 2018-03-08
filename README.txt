@@ -163,7 +163,7 @@ do not invoke the indexer with purge or replace parameter.
 Unfortunately Pickmybrain does not support modifying of already indexed data.
 However, unwanted or deprecated document ids can be disabled with the API.
 For detailed instructions, please see API documentation in
-http://www.hollilla.com/pickmybrain/api.php
+http://www.pickmybra.in/api.php
 
 How to search
 -------------
@@ -174,7 +174,7 @@ into your own application:
 1. For PHP applications, use the Pickmybrain API.
 
 For detailed instructions, please view the Pickmybrain API documentation 
-in http://www.hollilla.com/pickmybrain/api.php
+in http://www.pickmybra.in/api.php
 
 2. You can also search from the command line and thus use Pickmybrain
 with other programming languages as well. Please run the file
