@@ -6,7 +6,7 @@
  *
  * You should have received a copy of the GNU GPLv3 license 
  * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * or visit: http://www.pickmybra.in
  */
 
 /*

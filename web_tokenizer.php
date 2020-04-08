@@ -6,7 +6,7 @@
  *
  * You should have received a copy of the GNU GPLv3 license 
  * with this file. If not, please write to: henri.ruutinen@gmail.com
- * or visit: http://www.hollilla.com/pickmybrain
+ * or visit: http://www.pickmybra.in
  */
 
 ini_set('memory_limit', '1024M');
@@ -1672,10 +1672,7 @@ try
 				SetProcessState($index_id, $process_number, 0);
 				echo "Indexing was requested to be terminated...\n";
 				$connection->query("UPDATE PMBIndexes SET current_state = 0 WHERE ID = $index_id");
-				break;
-				
-				# no indexing permission, abort now
-				#die("Indexing was requested to be terminated");
+				return;
 			}
 		}
 		catch ( PDOException $e ) 
