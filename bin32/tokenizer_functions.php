@@ -9,6 +9,8 @@
  * or visit: http://www.pickmybra.in
  */
 
+/* 32_BIT_VERSION (DO NOT MODIFY OR REMOVE THIS COMMENT) */
+
 class Metaphones
 {
 	private $meta_lookup_encode;
@@ -541,7 +543,6 @@ function deleteIndex($index_id)
 	return true;
 }
 
-
 function execWithCurl($url, $async = true)
 {
 	$url = str_replace("localhost", $_SERVER['SERVER_NAME'], $url);
@@ -590,7 +591,6 @@ function execWithCurl($url, $async = true)
 	
 	return $content;
 }
-
 
 function expand_synonyms($synonyms) 
 {
@@ -2034,6 +2034,7 @@ function uint_crc32_string($str)
 	return "$checksum";
 }
 
+// 32bit version
 function DeltaVBencode(array $integers, array $hex_lookup, $start_offset = 0)
 {
 	$rparts = "";
@@ -2053,8 +2054,8 @@ function DeltaVBencode(array $integers, array $hex_lookup, $start_offset = 0)
 			$lowest7bits = $tmp & 127;
 			
 			# shift original number >> 7 
-			$tmp >>= 7;
-			
+			$tmp = floor($tmp / 128);		// same as >> 7	
+
 			if ( $tmp ) 
 			{
 				# number is yet to end, prepend 0 ( or actually do nothing :)
@@ -2074,78 +2075,98 @@ function DeltaVBencode(array $integers, array $hex_lookup, $start_offset = 0)
 	return $rparts;
 }
 
+// 32bit version
 function VBDeltaDecode($hexstring, array $hex_lookup)
 {
-	$delta = 1;
-	$len = strlen($hexstring);
-	$temp = 0;
-	$shift = 0;
+	$delta 	= 1;
+	$shift	= 0;
+	$temp	= -1;
+	$len 	= strlen($hexstring);
 	$result = array();
+	$pow_lookup = array(1, 128, 16384, 2097152, 268435456, 34359738368, 4398046511104, 562949953421312);
 	
 	for ( $i = 0 ; $i < $len ; ++$i )
 	{
 		$bits = $hex_lookup[$hexstring[$i]];
-		$temp |= (($bits & 127) << $shift*7);
-		++$shift;
-			
+
 		if ( $bits > 127 )
-		{
+		{		
+			$delta = $pow_lookup[$shift] * ($bits&127) + $temp + $delta;
+			$result[] = "$delta";	
 			# 8th bit is set, number ends here ! 
-			$delta = $temp+$delta-1;
-			$result[] = $delta;
-			$temp = 0;
-			$shift = 0;
+
+			# reset temp variables
+			$temp 	= -1;
+			$shift 	= 0;
+		}
+		else
+		{
+			$temp += $pow_lookup[$shift] * $bits;
+			++$shift;
 		}
 	}
 		
 	return $result;
 }
 
+// 32bit version
 function MergeCompressedData($old_data, $new_data, array $hex_lookup, array $hex_lookup_encode ) 
 {
-	# step 1: find the max delta value from the old sttring
-	$delta = 1;
-	$len = strlen($old_data);
-	$temp = 0;
-	$shift = 0;
-	$max_val = 0;
 	
+	$delta 		= 1;
+	$temp		= -1;
+	$shift		= 0;
+	$len 		= strlen($old_data);
+	$max_val 	= 0;
+	$first_value= 0;
+	$pow_lookup = array(1, 128, 16384, 2097152, 268435456, 34359738368, 4398046511104, 562949953421312);
+	
+	# step 1: find the max delta value from the old sttring
 	for ( $i = 0 ; $i < $len ; ++$i )
 	{
 		$bits = $hex_lookup[$old_data[$i]];
-		$temp |= (($bits & 127) << $shift*7);
-		++$shift;
-			
+		
 		if ( $bits > 127 )
-		{
+		{	
 			# 8th bit is set, number ends here ! 
-			$delta = $temp+$delta-1;
-			$max_val = $delta;
-			$temp = 0;
-			$shift = 0;
+			$delta 		= $pow_lookup[$shift] * ($bits&127) + $temp + $delta; 
+
+			# reset temp variables
+			$temp 	= -1;
+			$shift 	= 0;
+		}
+		else
+		{
+			$temp += $pow_lookup[$shift] * $bits;
+			++$shift;
 		}
 	}
+	
+	// the latest delta must be also the max value
+	$max_val	= $delta;
 
 	# reset variables for decoding
 	$delta = 1;
+	$temp  = -1;
+	$shift = 0;
 	$first_value_len = 0;
 	
 	# step 2: find the first value of the new_docids string and replace it with a proper delta value
 	for ( $i = 0 ; $i < 12 ; ++$i )
 	{
 		$bits = $hex_lookup[$new_data[$i]];
-		$temp |= (($bits & 127) << $shift*7);
-		++$shift;
-			
+
 		if ( $bits > 127 )
+		{	
+			$delta 				= $pow_lookup[$shift] * ($bits&127) + $temp + $delta; 
+			$first_value 		= $delta; 
+			$first_value_pos 	= $i+1;
+			$i 					= 12; # we got what we wanted, end now
+		}
+		else
 		{
-			# 8th bit is set, number ends here ! 
-			$delta = $temp+$delta-1;
-			$first_value = $delta; 
-			$temp = 0;
-			$shift = 0;
-			$first_value_pos = $i+1;
-			$i = 12; # we got what we wanted, end now
+			$temp += $pow_lookup[$shift] * $bits;
+			++$shift;
 		}
 	}
 	
@@ -2162,34 +2183,41 @@ function MergeCompressedData($old_data, $new_data, array $hex_lookup, array $hex
 	return $old_data . $first_new_value . substr($new_data, $first_value_pos);
 }
 
+# 32bit version
 # finds out maximum integer value of variable byte length and delta encoded array
 function VBDeltaStringMaxValue($hexstring, array $hex_lookup)
 {
-	$delta = 1;
-	$len = strlen($hexstring);
-	$temp = 0;
-	$shift = 0;
-	$max_val = 0;
+	$delta 		= 1;
+	$temp		= -1;
+	$shift		= 0;
+	$len 		= strlen($hexstring);
+	$pow_lookup = array(1, 128, 16384, 2097152, 268435456, 34359738368, 4398046511104, 562949953421312);
 	
 	for ( $i = 0 ; $i < $len ; ++$i )
 	{
 		$bits = $hex_lookup[$hexstring[$i]];
-		$temp |= (($bits & 127) << $shift*7);
-		++$shift;
-			
+	
 		if ( $bits > 127 )
-		{
+		{	
 			# 8th bit is set, number ends here ! 
-			$delta = $temp+$delta-1;
-			$max_val = $delta;
-			$temp = 0;
-			$shift = 0;
+			$delta 		= $pow_lookup[$shift] * ($bits&127) + $temp + $delta; 
+
+			# reset temp variables
+			$temp 	= -1;
+			$shift 	= 0;
+		}
+		else
+		{
+			$temp += $pow_lookup[$shift] * $bits;
+			++$shift;
 		}
 	}
 		
-	return $max_val;
+	return $delta;
 }
 
+/* 32bit version */
+/* applies variable byte encoding to a presorted array of values*/
 function VBencode(array $array, array $hex_lookup)
 {
 	$rparts = "";
@@ -2204,7 +2232,7 @@ function VBencode(array $array, array $hex_lookup)
 			$lowest7bits = $integer & 127;
 			
 			# shift original number >> 7 
-			$integer = $integer >> 7;
+			$integer = floor($integer / 128);	// same as >> 7
 			
 			if ( $integer ) 
 			{

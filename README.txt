@@ -1,10 +1,10 @@
 Pickmybrain
 -----------
 
-Version:   1.07 Release 
-Published: 22.11.2017
+Version:   1.09 Release 
+Published: 26.02.2021
 
-copyright 2015-2017 Henri Ruutinen 
+copyright 2015-2021 Henri Ruutinen 
 
 email: henri.ruutinen@gmail.com
 website: http://www.pickmybra.in
@@ -54,22 +54,18 @@ Compatibility
 -------------
 
 In short:
-- PHP >= 5.3 (x64 built)
+- PHP >= 5.3 (x86 compatible, x64 recommended)
 - MySQL >= 5.1 ( or equivalent )
 
 Pickmybrain is developed and tested on Linux. More specifically
-on 64-bit version of Ubuntu 14.04.1 LTS. Pickmybrain requires 64bit
-built of the PHP programming language and a MySQL database ( or a database 
-that supports similar SQL syntax and table structures ). Pickmybrain 
-should work on other operating systems as well.
+on 64-bit version of Ubuntu 14.04.1 LTS, though Pickmybrain should work on 
+other operating systems as well. Pickmybrain runs best on a 64bit
+PHP runtime environment, but as of version 1.09 32bit PHP environments are also supported. 
+MySQL database or a database with similar SQL syntax and table structures is required. 
 
 In theory, Pickmybrain should work with PHP version of 5.3 and MySQL version
 of 5.1, but this has not been tested. Pickmybrain is developed with PHP
 version of 5.4.6 and MySQL version of 5.6.10.
-
-The 64bit requirement is mostly due to CRC32 checksums which behave 
-differently in PHP's 32bit and 64bit versions. 
-
 
 Getting Pickmybrain
 -------------------

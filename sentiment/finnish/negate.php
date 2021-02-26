@@ -1,18 +1,13 @@
 <?php
 
-/* 
-	List of words that negate/inverse the meaning of immediately following phrases 
-	For Finnish language
-	
-	All rights reserved. 
-	Distributing, copying and selling this program code is strictly prohibited. 
-	© Henri Ruutinen / PickMyBra.in 2015-2016
-	
-	If for a some reason you came across this file without purchasing it or without 
-	being a part of an organization that purchased it, please visit 
-	http://www.pickmybra.in and notify us.
-	 
-*/
+/* Copyright (C) 2017 Henri Ruutinen - All Rights Reserved
+ * You may use, distribute and modify this code under the
+ * terms of the GNU GPLv3 license
+ *
+ * You should have received a copy of the GNU GPLv3 license 
+ * with this file. If not, please write to: henri.ruutinen@gmail.com
+ * or visit: http://www.pickmybra.in
+ */
 
 $data = array(
 "eivät ole" => 1,

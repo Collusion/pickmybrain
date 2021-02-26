@@ -90,11 +90,13 @@ body
 {
 	display:none;
 	opacity: 0;
+	left: -1000px;
 }
 
 .hidden
 {
 	/*display:none;*/
+	left:auto;
 	-webkit-transition: all .25s ease;
     -moz-transition: all .25s ease;
     transition: all .25s ease;
@@ -109,6 +111,7 @@ body
     -moz-transition: all .25s ease;
     transition: all .25s ease;
 	opacity: 1;
+	left:auto;
 }
 
 .pmbline

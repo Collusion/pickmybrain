@@ -1,0 +1,1 @@
+If you are running a 32bit PHP environment, please copy these files into the upper/parent folder
