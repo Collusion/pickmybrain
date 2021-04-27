@@ -1445,6 +1445,7 @@ class PickMyBrain
 			# create both SQL clauses ( tokens + prefixes ) at the same time
 			if ( isset($token) && $token !== "" && $token !== "-" )
 			{
+				$token = "$token";	# ensure string type
 				$non_wanted_temp = false;
 				$disable_stemming_temp = false;
 				
@@ -3704,7 +3705,6 @@ class PickMyBrain
 		# try matching the whole searchstring first
 		if ( $wordcount > 1 ) 
 		{
-			#$tpos = stripos($string, $searchstring." ");
 			$pre_match = array();
 			preg_match('/\b'.preg_quote($searchstring,"/").'\b/iu', $string, $pre_match, PREG_OFFSET_CAPTURE);
 	
@@ -3720,8 +3720,9 @@ class PickMyBrain
 			# search for partial matches
 			foreach ( $keywords as $ki => $chunk )
 			{
-				if ( !empty($chunk) )
+				if ( isset($chunk) && $chunk !== "" )
 				{	
+					$chunk = "$chunk";	# ensure string type
 					$exact = false;
 					if ( $chunk[0] === "=" ) 
 					{
@@ -4668,7 +4669,7 @@ class PMBStemmer
 	{
 		$c = self::$regex_consonant;
 
-		return preg_match("#$c{2}$#", $str, $matches) AND $matches[0]{0} == $matches[0]{1};
+		return preg_match("#$c{2}$#", $str, $matches) AND $matches[0][0] == $matches[0][1];
 	}
 
 
@@ -4685,9 +4686,9 @@ class PMBStemmer
 
 		return     preg_match("#($c$v$c)$#", $str, $matches)
 			   AND strlen($matches[1]) == 3
-			   AND $matches[1]{2} != 'w'
-			   AND $matches[1]{2} != 'x'
-			   AND $matches[1]{2} != 'y';
+			   AND $matches[1][2] != 'w'
+			   AND $matches[1][2] != 'x'
+			   AND $matches[1][2] != 'y';
 	}
 }
 
