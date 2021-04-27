@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   1.09 Release 
-Published: 26.02.2021
+Version:   1.010 Release 
+Published: 27.04.2021
 
 copyright 2015-2021 Henri Ruutinen 
 
