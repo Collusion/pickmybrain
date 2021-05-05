@@ -1,14 +1,13 @@
 Pickmybrain
 -----------
 
-Version:   1.010 Release 
-Published: 27.04.2021
+Version:   1.011 Release 
+Published: 05.05.2021
 
 copyright 2015-2021 Henri Ruutinen 
 
 email: henri.ruutinen@gmail.com
-website: http://www.pickmybra.in
-
+website: https://www.pickmybra.in
 
 Overview
 --------
@@ -169,6 +168,9 @@ into your own application:
 
 1. For PHP applications, use the Pickmybrain API.
 
+As of version 1.0.11, a demo search page is provided with the Pickmybrain search.
+See the folder "demo" under the main folder and open/edit the file named "demo.php".
+
 For detailed instructions, please view the Pickmybrain API documentation 
 in http://www.pickmybra.in/api.php
 
@@ -313,4 +315,5 @@ Pickmybrain uses the following libraries:
 * PHP Domain Parser ( https://github.com/jeremykendall/php-domain-parser ) 
 * PHP Porter Stemmer for English ( http://tartarus.org/martin/PorterStemmer/php.txt )
 * PHP DoubleMetaPhone ( http://swoodbridge.com/DoubleMetaPhone/ )
+* select-css ( https://github.com/filamentgroup/select-css/blob/master/src/select-css.css )
 

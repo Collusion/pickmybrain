@@ -781,6 +781,32 @@ class PickMyBrain
 		return $stem;
 	}
 	
+	private function CharsetProcessing($query)
+	{
+		# separate letters & numbers from each other?
+		if ( $this->separate_alnum ) 
+		{
+			$query = preg_replace('/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/u', ' ', $query);
+		}
+		
+		#  remove ignore chars
+		if ( !empty($this->ignore_chars) )
+		{
+			$query = str_replace($this->ignore_chars, "", $query);
+		}
+
+		# filter query with the charset regexp ( drops non-defined characters )
+		$query = preg_replace($this->charset_regexp, " ", $query);
+		
+		# filter out blend chars in certain situations
+		if ( !empty($this->blend_chars) )
+		{
+			$query = str_replace($this->blend_chars, " ", $query);
+		}
+		
+		return $query;
+	}
+	
 	public function MetaphoneSearch($query)
 	{
 		if ( trim($query) === "" )
@@ -803,26 +829,11 @@ class PickMyBrain
 		$mass_find 		= array_keys($dialect_array);
 		$mass_replace 	= array_values($dialect_array);
 		
-		# separate letters & numbers from each other?
-		if ( $this->separate_alnum ) 
-		{
-			$query = preg_replace('/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/u', ' ', $query);
-		}
+		# just to be sure
+		$query = mb_strtolower($query);
 		
-		#  remove ignore chars
-		if ( !empty($this->ignore_chars) )
-		{
-			$query = str_replace($this->ignore_chars, "", $query);
-		}
-
-		# filter query with the charset regexp ( drops non-defined characters )
-		$query = preg_replace($this->charset_regexp, " ", $query);
-		
-		# filter out blend chars in certain situations
-		if ( !empty($this->blend_chars) )
-		{
-			$query = str_replace($this->blend_chars, " ", $query);
-		}
+		# do charset processing
+		$query = $this->CharsetProcessing($query);
 		
 		if ( empty($query) )
 		{
@@ -1130,9 +1141,7 @@ class PickMyBrain
 									$final_suggestions[$original_token] = $alternative_token;	
 								}
 							}
-						}
-						
-						
+						}		
 					}
 					else if ( !isset($original_match_data[$original_token]) && isset($existing_prefix_matches[$original_token]) ) 
 					{
@@ -1145,13 +1154,7 @@ class PickMyBrain
 						$final_suggestions[$original_token] = $existing_prefix_matches[$original_token][1];	
 					}
 				}
-				
-				if ( !empty($final_suggestions) )
-				{
-					#echo "DID YOU MEAN:\n";
-					#var_dump($final_suggestions);
-				}
-				
+
 				return $final_suggestions;
 				
 			}
@@ -1355,12 +1358,6 @@ class PickMyBrain
 
 		$query = mb_strtolower($query);
 
-		# separate letters & numbers from each other?
-		if ( $this->separate_alnum ) 
-		{
-			$query = preg_replace('/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/u', ' ', $query);
-		}
-		
 		# if incoming query contains special characters that are not present in the current charset
 		# try replacing them with corresponding values provided before
 		if ( $this->dialect_matching && !empty($this->mass_find) )
@@ -1368,20 +1365,8 @@ class PickMyBrain
 			$query = str_replace($this->mass_find, $this->mass_replace, $query);
 		}
 
-		#  remove ignore chars
-		if ( !empty($this->ignore_chars) )
-		{
-			$query = str_replace($this->ignore_chars, "", $query);
-		}
-
-		# filter query with the charset regexp ( drops non-defined characters )
-		$query = preg_replace($this->charset_regexp, " ", $query);
-		
-		# filter out blend chars in certain situations
-		if ( !empty($this->blend_chars) )
-		{
-			$query = str_replace($this->blend_chars, " ", $query);
-		}
+		# do charset processing
+		$query = $this->CharsetProcessing($query);
 
 		/* Exact matching ?*/
 		if ( substr_count($query, "\"") % 2 === 0 ) 
@@ -1461,7 +1446,7 @@ class PickMyBrain
 			# create both SQL clauses ( tokens + prefixes ) at the same time
 			if ( isset($token) && $token !== "" && $token !== "-" )
 			{
-				$token = "$token"; # ensure string type
+				$token = "$token"; # ensure that the token is in string format
 				$non_wanted_temp = false;
 				$disable_stemming_temp = false;
 				
@@ -3358,14 +3343,13 @@ class PickMyBrain
 		return (string)crc32($str);
 	}
 
-	
 	public function SetFieldWeights($input = array())
 	{
 		if ( !empty($input) && is_array($input) )
 		{
 			foreach ( $input as $index => $value ) 
 			{
-				if ( (int)$value === $value && $value >= 0 && in_array($value, $this->data_columns) ) 
+				if ( (int)$value === $value && $value >= 0 && in_array($index, $this->data_columns) ) 
 				{
 					$this->field_weights[$index] = $value;
 				}
@@ -3516,7 +3500,7 @@ class PickMyBrain
 	
 	public function SetFilterBy($attribute, $value)
 	{
-		if ( (int)$value === $value )
+		if ( is_numeric($value) )
 		{
 			$attribute = trim($attribute);
 			$prefix = $attribute[0];
@@ -3555,7 +3539,7 @@ class PickMyBrain
 	
 	public function SetFilterRange($attribute, $min, $max)
 	{
-		if ( (int)$min === $min && (int)$max === $max )
+		if ( is_numeric($min) && is_numeric($max) )
 		{
 			$attribute = trim($attribute);
 			$prefix = $attribute[0];
@@ -3747,6 +3731,7 @@ class PickMyBrain
 		# try matching the whole searchstring first
 		if ( $wordcount > 1 ) 
 		{
+			#$tpos = stripos($string, $searchstring." ");
 			$pre_match = array();
 			preg_match('/\b'.preg_quote($searchstring,"/").'\b/iu', $string, $pre_match, PREG_OFFSET_CAPTURE);
 	
@@ -3764,7 +3749,7 @@ class PickMyBrain
 			{
 				if ( isset($chunk) && $chunk !== "" )
 				{	
-					$chunk = "$chunk"; # ensure string type
+					$chunk = "$chunk"; # ensure string format
 					$exact = false;
 					if ( $chunk[0] === "=" ) 
 					{

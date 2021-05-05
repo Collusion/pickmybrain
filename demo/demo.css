@@ -1,0 +1,196 @@
+body {
+	font-family: Arial,Helvetica Neue,Helvetica,sans-serif; 
+	font-size: 1em;
+}
+
+.radius {
+	-moz-border-radius: 2px;
+	-webkit-border-radius: 2px;
+	-khtml-border-radius: 2px;
+	border-radius: 2px;
+}
+
+input, textarea {
+	border:1px solid #eee;
+	-moz-border-radius: 2px;
+	-webkit-border-radius: 2px;
+	-khtml-border-radius: 2px;
+	border-radius: 2px;
+	font-family: Arial,Helvetica Neue,Helvetica,sans-serif; 
+}
+.center {
+	margin: auto;
+	max-width: 800px;
+	padding: 10px;
+	margin-bottom:20px;
+}
+.iblock {
+	display:inline-block;
+}
+.footer {
+	margin:20px 0 30px 0;
+}
+.clear {
+	clear:both;
+	width:100%;
+}
+.tcenter {
+	text-align:center;
+}
+.searchbar {
+	width:90%;
+	max-width:500px;
+	height:34px;
+	line-height:32px;
+	margin:20px 0 10px 0;
+	padding:2px 10px 2px 10px;
+	border:1px solid #ccc;
+}
+.submit {
+	width:60px;
+	height:38px;
+	cursor:pointer;
+	border:1px solid #bbb;
+	background:#eee;
+	margin-left:-65px;
+}
+
+#logo {
+	dispay:inline;
+	max-width:100%;
+	height:auto;
+	margin-top:50px;
+}
+.shadow:hover, .shadow:focus {
+
+	-webkit-box-shadow: 0px 0px 4px 1px rgba(0,0,0,0.15);
+	-moz-box-shadow: 0px 0px 4px 1px rgba(0,0,0,0.15);
+	box-shadow: 0px 0px 4px 1px rgba(0,0,0,0.15);
+}
+.page_b, .page_b:visited {
+	background:#eee;
+	border:1px solid #ddd;
+	height:19px;
+	width:16px;
+	padding:4px 6px;
+	display:inline-block;
+	margin: 10px 10px 5px 0;
+	text-decoration:none;
+	border:1px solid #ccc;
+	text-align:center;
+	color:#333;
+}
+
+.page_b:hover {
+	font-weight:bold;
+}
+
+.page_b_sel, .page_b_sel:visited, .page_b_sel:active {
+	font-weight:bold;
+	color:#000;
+	border:1px solid #000;
+	background:#fff;
+}
+
+.result_container {
+	margin-top:10px;
+	margin-bottom:2px;
+	line-height:15px;
+	padding:10px 0;
+	color:#838c95;
+	display:inline-block;
+	width:100%;
+}
+
+.result_title {
+	color:#11abb0;
+	font-size:120%;
+	width:100%;
+	display:inline-block;
+	clear:both;
+	text-decoration:none;
+}
+
+.result_title:hover {
+	text-decoration:underline;
+}
+
+.result_url {
+	padding:3px 0;
+	color:#838c95;
+	width:100%;
+	display:inline-block;
+	clear:both;
+}
+
+.result_text {
+	padding:3px 0;
+	color:#222;
+	width:100%;
+	display:inline-block;
+	clear:both;
+}
+
+.suggestions {
+	margin-top:10px;
+	line-height:15px;
+	padding:10px 2%;
+	color:#333;
+	display:inline-block;
+	width:96%;
+	font-weight:bold;
+}
+
+/* class applies to select element itself, not a wrapper element */
+.select-css {
+	display: block;
+	width: auto;
+	font-size: 12px;
+	/*font-family: sans-serif;
+	font-weight: 700;*/
+	color: #444;
+	line-height: 1.3;
+	padding: .6em 1.4em .5em .8em;
+	max-width: 100%; /* useful when width is set to anything other than 100% */
+	box-sizing: border-box;
+	margin: 0;
+	border: 1px solid #aaa;
+	box-shadow: 0 1px 0 1px rgba(0,0,0,.04);
+	border-radius: .2em;
+	-moz-appearance: none;
+	-webkit-appearance: none;
+	appearance: none;
+	background-color: #fff;
+	/* note: bg image below uses 2 urls. The first is an svg data uri for the arrow icon, and the second is the gradient. 
+		for the icon, if you want to change the color, be sure to use `%23` instead of `#`, since it's a url. You can also swap in a different svg icon or an external image reference	
+	*/
+	background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23007CB2%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'),
+	  linear-gradient(to bottom, #ffffff 0%,#e5e5e5 100%);
+	background-repeat: no-repeat, repeat;
+	/* arrow icon position (1em from the right, 50% vertical) , then gradient position*/
+	background-position: right .7em top 50%, 0 0;
+	/* icon size, then gradient */
+	background-size: .65em auto, 100%;
+}
+/* Hide arrow icon in IE browsers */
+.select-css::-ms-expand {
+	display: none;
+}
+/* Hover style */
+.select-css:hover {
+	border-color: #888;
+}
+/* Focus style */
+.select-css:focus {
+	border-color: #aaa;
+	/* It'd be nice to use -webkit-focus-ring-color here but it doesn't work on box-shadow */
+	box-shadow: 0 0 1px 3px rgba(59, 153, 252, .7);
+	box-shadow: 0 0 0 3px -moz-mac-focusring;
+	color: #222; 
+	outline: none;
+}
+
+/* Set options to normal weight */
+.select-css option {
+	font-weight:normal;
+}
