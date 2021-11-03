@@ -451,7 +451,6 @@ catch ( PDOException $e )
 	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
 }
 
-
 try
 {
 	$transfer_time_start = microtime(true);
@@ -520,14 +519,5 @@ echo "Combining temp tables took $transfer_time_end seconds \n";
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
 echo "------------------------------------------------\nCompressing token data took $tokens_end seconds \n------------------------------------------------\n\nWaiting for prefixes...";
-
-
-
-
-
-
-
-
-
 
 ?>

@@ -784,12 +784,9 @@ try
 	# remove the old table and rename the new one
 	$connection->query("DROP TABLE $clean_slate_target");
 	$connection->query("ALTER TABLE $target_table RENAME TO $clean_slate_target");
-	#$connection->query("ALTER TABLE $clean_slate_target ADD INDEX(metaphone, doc_matches)"); # add metaphone index
-		
+	
 	$connection->commit();
 	$drop_end = microtime(true) - $drop_start;
-	
-	
 }
 catch ( PDOException $e ) 
 {

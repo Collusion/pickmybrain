@@ -218,7 +218,6 @@ try
 		}
 		else
 		{
-			echo "LAST ROW - counter: $counter process_number: $process_number \n";
 			$last_row = true;
 			
 			if ( $counter === 1 ) 
@@ -454,11 +453,6 @@ try
 							unset($oldrow_copy);
 							
 						}
-						else
-						{
-							echo "NEW: checksum: $min_checksum min_token: $min_token \n";
-							echo "OLD: checksum: ".$oldrow["checksum"]." min_token: ".$oldrow["token"]." \n\n";
-						}
 					}
 					
 					unset($oldrow_copy);
@@ -557,7 +551,7 @@ try
 	{
 		$insert_sql 	.= ",(".$oldrow["checksum"].",
 							".$connection->quote($oldrow["token"]).",
-							".$oldrow["metaphone"]."
+							".$oldrow["metaphone"].",
 							".$oldrow["doc_matches"].",
 							".$oldrow["max_doc_id"].",
 							".$connection->quote($oldrow["doc_ids"]).")";
@@ -569,7 +563,7 @@ try
 	{
 		$insert_sql 	.= ",(".$oldrow["checksum"].",
 							".$connection->quote($oldrow["token"]).",
-							".$oldrow["metaphone"]."
+							".$oldrow["metaphone"].",
 							".$oldrow["doc_matches"].",
 							".$oldrow["max_doc_id"].",
 							".$connection->quote($oldrow["doc_ids"]).")";
@@ -658,7 +652,6 @@ echo "All token processes have now finished, $interval seconds elapsed, starting
 echo "Oldreads: $oldreads \n";
 echo "Latent oldreads: $latent_oldreads \n";
 
-
 try
 {
 	# remove the temporary table
@@ -668,7 +661,6 @@ catch ( PDOException $e )
 {
 	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
 }
-
 
 try
 {
@@ -727,7 +719,6 @@ try
 	
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
-
 	
 	$drop_start = microtime(true);
 	$connection->beginTransaction();
@@ -738,8 +729,6 @@ try
 		
 	$connection->commit();
 	$drop_end = microtime(true) - $drop_start;
-	
-	
 }
 catch ( PDOException $e ) 
 {
@@ -756,11 +745,5 @@ if ( !$clean_slate ) echo "Switching tables took $drop_end seconds \n";
 echo "Memory usage : " . memory_get_usage()/1024/1024 . " MB\n";
 echo "Memory usage (peak) : " . memory_get_peak_usage()/1024/1024 . " MB\n";
 echo "------------------------------------------------\nCompressing token data took $tokens_end seconds \n------------------------------------------------\n\nWaiting for prefixes...";
-
-
-
-
-
-
 
 ?>
