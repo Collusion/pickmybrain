@@ -75,6 +75,18 @@ else
 	die("error: the settings file $filepath could not be parsed.");
 }
 
+# php binary path?
+if ( !defined("PHP_PATH") ) 
+{
+	if ( !empty($php_binary_path) ) 
+	{
+		define("PHP_PATH", $php_binary_path); # the default option
+	}
+	else
+	{
+		define("PHP_PATH", "php"); # the default option
+	}
+}
 
 if ( $dialect_processing )
 {

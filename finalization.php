@@ -14,6 +14,7 @@ try
 	$latest_rotation_sql = ",latest_rotation = UNIX_TIMESTAMP()";
 	$delta_doc_count_sql = "";
 	$main_max_doc_id_sql = "";
+	$main_min_doc_id_sql = "";
 	
 	if ( !empty($replace_index) )
 	{
@@ -47,6 +48,9 @@ try
 		$connection->query("ALTER TABLE PMBPrefixes".$index_suffix."_temp RENAME TO PMBPrefixes".$index_suffix."_delta");
 		$connection->commit();
 		
+		# update PMBIndexes with new max_delta_id value
+		$connection->query("UPDATE PMBIndexes SET max_delta_id = (SELECT MAX(ID) FROM PMBDocinfo".$index_suffix."_delta) WHERE ID = $index_id");
+		
 		# add documents from the PMBDocinfo_id_delta to the main table
 		$connection->query("DELETE FROM PMBDocinfo".$index_suffix." WHERE ID > (SELECT max_id FROM PMBIndexes WHERE ID = $index_id)");
 		$connection->query("INSERT INTO PMBDocinfo".$index_suffix." SELECT * FROM PMBDocinfo".$index_suffix."_delta");
@@ -64,7 +68,7 @@ try
 		
 	}
 	
-	# delta-indexing is not enable, delete possible old values
+	# delta-indexing is not enabled, delete possible old values
 	if ( empty($delta_indexing) )
 	{
 		$connection->query("DROP TABLE IF EXISTS PMBTokens".$index_suffix."_delta");
@@ -72,10 +76,11 @@ try
 		$connection->query("DROP TABLE IF EXISTS PMBDocinfo".$index_suffix."_delta");
 		$delta_doc_count_sql	 = ",delta_documents = 0";
 	}
-	
+
 	if ( empty($delta_indexing) || (!empty($delta_indexing) && $clean_slate) )
 	{
 		$main_max_doc_id_sql = ",max_id = ( SELECT MAX(ID) FROM PMBDocinfo$index_suffix )";
+		$main_min_doc_id_sql = ",min_id = ( SELECT MIN(ID) FROM PMBDocinfo$index_suffix )";
 	}
 
 	$connection->query("UPDATE PMBIndexes SET 
@@ -85,6 +90,7 @@ try
 						$latest_rotation_sql
 						$delta_doc_count_sql
 						$main_max_doc_id_sql
+						$main_min_doc_id_sql
 						WHERE ID = $index_id ");
 }
 catch ( PDOException $e ) 

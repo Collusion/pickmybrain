@@ -294,6 +294,12 @@ function check_32bit_binaries()
 	return $files;
 }
 
+/* placeholder function */
+function test_custom_functions()
+{
+	return false;
+}
+
 function exec_available()
 {
 	if ( !function_exists('exec') || exec('echo EXEC') != 'EXEC' )
@@ -369,42 +375,46 @@ function checkPMBIndexes()
 {
 	$table_sql = "CREATE TABLE PMBIndexes (
 	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-	 name varbinary(20) NOT NULL,
-	 type tinyint(3) unsigned NOT NULL,
-	 comment varbinary(255) NOT NULL,
+	 name varbinary(20) NOT NULL DEFAULT '',
+	 type tinyint(3) unsigned NOT NULL DEFAULT '',
+	 comment varbinary(255) NOT NULL DEFAULT '',
 	 documents int(10) unsigned NOT NULL DEFAULT '0',
+	 min_id int(10) unsigned NOT NULL DEFAULT '0',
 	 max_id int(10) unsigned NOT NULL DEFAULT '0',
+	 max_delta_id int(10) unsigned NOT NULL DEFAULT '0',
   	 delta_documents int(10) unsigned NOT NULL DEFAULT '0',
 	 latest_rotation int(10) unsigned NOT NULL DEFAULT '0',
-	 updated int(10) unsigned NOT NULL,
-	 indexing_permission tinyint(3) unsigned NOT NULL,
+	 updated int(10) unsigned NOT NULL DEFAULT '0',
+	 indexing_permission tinyint(3) unsigned NOT NULL DEFAULT '0',
 	 pwd_token binary(12) DEFAULT NULL,
-	 indexing_started int(10) unsigned NOT NULL,
-	 current_state tinyint(3) unsigned NOT NULL,
-	 temp_loads int(8) unsigned NOT NULL,
-	 temp_loads_left int(8) unsigned NOT NULL,
-	 disabled_documents mediumblob NOT NULL,
+	 indexing_started int(10) unsigned NOT NULL DEFAULT '0',
+	 current_state tinyint(3) unsigned NOT NULL DEFAULT '0',
+	 temp_loads int(8) unsigned NOT NULL DEFAULT '0',
+	 temp_loads_left int(8) unsigned NOT NULL DEFAULT '0',
+	 disabled_documents mediumblob NOT NULL DEFAULT '',
 	 PRIMARY KEY (ID),
 	 UNIQUE KEY name (name)
 	) ENGINE=MYISAM DEFAULT CHARSET=utf8";
 	
 	$required_columns = array(
 	"ID" 				=> "ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT",
-	"name" 				=> "name varbinary(20) NOT NULL",
-	"type" 				=> "type tinyint(3) unsigned NOT NULL",
-	"comment" 			=> "comment varbinary(255) NOT NULL",
+	"name" 				=> "name varbinary(20) NOT NULL DEFAULT ''",
+	"type" 				=> "type tinyint(3) unsigned NOT NULL DEFAULT ''",
+	"comment" 			=> "comment varbinary(255) NOT NULL DEFAULT ''",
 	"documents" 		=> "documents int(10) unsigned NOT NULL DEFAULT '0'",
+	"min_id" 			=> "min_id int(10) unsigned NOT NULL DEFAULT '0'",
 	"max_id" 			=> "max_id int(10) unsigned NOT NULL DEFAULT '0'",
+	"max_delta_id" 		=> "max_delta_id int(10) unsigned NOT NULL DEFAULT '0'",
 	"delta_documents" 	=> "delta_documents int(10) unsigned NOT NULL DEFAULT '0'",
 	"latest_rotation" 	=> "latest_rotation int(10) unsigned NOT NULL DEFAULT '0'",
-	"updated"			 => "updated int(10) unsigned NOT NULL",
-	"indexing_permission" => "indexing_permission tinyint(3) unsigned NOT NULL",
+	"updated"			 => "updated int(10) unsigned NOT NULL DEFAULT '0'",
+	"indexing_permission" => "indexing_permission tinyint(3) unsigned NOT NULL DEFAULT '0'",
 	"pwd_token" 		=> "pwd_token binary(12) DEFAULT NULL",
-	"indexing_started" 	=> "indexing_started int(10) unsigned NOT NULL",
-	"current_state" 	=> "current_state tinyint(3) unsigned NOT NULL",
-	"temp_loads" 		=> "temp_loads int(8) unsigned NOT NULL",
-	"temp_loads_left" 	=> "temp_loads_left int(8) unsigned NOT NULL",
-	"disabled_documents" => "disabled_documents mediumblob NOT NULL"
+	"indexing_started" 	=> "indexing_started int(10) unsigned NOT NULL DEFAULT '0'",
+	"current_state" 	=> "current_state tinyint(3) unsigned NOT NULL DEFAULT '0'",
+	"temp_loads" 		=> "temp_loads int(8) unsigned NOT NULL DEFAULT '0'",
+	"temp_loads_left" 	=> "temp_loads_left int(8) unsigned NOT NULL DEFAULT '0'",
+	"disabled_documents" => "disabled_documents mediumblob NOT NULL DEFAULT ''"
 	);
 	
 	try
@@ -555,7 +565,7 @@ function execWithCurl($url, $async = true)
 	}
 	
 	# maintain session through curl request
-	if ( !empty($_SESSION["pmb_logged_in"]) && $async === false )
+	if ( !empty($_SESSION["pmb_logged_in"]) )
 	{
 		$useragent = $_SERVER['HTTP_USER_AGENT'];
 		$strCookie = 'PHPSESSID=' . $_COOKIE['PHPSESSID'] . '; path=/';
@@ -579,12 +589,12 @@ function execWithCurl($url, $async = true)
     );
 	
 	# maintain session through curl request
-	if ( !empty($_SESSION["pmb_logged_in"]) && $async === false )
+	if ( !empty($_SESSION["pmb_logged_in"]) ) 
 	{
 		$options += array(CURLOPT_COOKIE => $strCookie);
 	}
 
-    $ch      = curl_init($url);
+    $ch = curl_init($url);
     curl_setopt_array( $ch, $options );
     $content = curl_exec( $ch );
     curl_close( $ch );
@@ -861,7 +871,7 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 						++$c;
 					}
 					
-					$data_array[(int)$main_id_value] = 1;
+					$data_array[(string)$main_id_value] = 1;
 					++$data_count;
 					
 					if ( $e_count > 0 )

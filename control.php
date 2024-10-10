@@ -24,215 +24,7 @@ if ( !isset($_SESSION["pmb_logged_in"]) || (PMB_SESSIONLEN != 0 && time() > $_SE
 	return;
 }
 
-// which scheme ? 
-if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') 
-{
-	// https
-	define("SITE_SCHEME", "https://");
-}
-else
-{
-	define("SITE_SCHEME", "http://");
-}
-
-
 require_once("tokenizer_functions.php");
-
-/*
-helper function:
-prints the window that contains index(er) status and 'run indexer' controls etc */
-function create_index_status_window($index_id, $delta_indexing)
-{
-	if ( empty($index_id) || !is_numeric($index_id) ) return false;
-	
-	try
-	{
-		$connection = db_connection();
-		
-		$indexing_state = 0;
-		$indexing_permission = 0;	
-		$doc_count = 0;
-		$purge_button = "";
-		$delete_button = "";
-	
-		$statepdo = $connection->query("SELECT * FROM PMBIndexes WHERE ID = $index_id");
-		
-		if ( $row = $statepdo->fetch(PDO::FETCH_ASSOC) )
-		{
-			$index_name				= $row["name"];
-			$index_type				= (int)$row["type"];
-			$doc_count 				= (int)$row["documents"];
-			$delta_doc_count		= (int)$row["delta_documents"];
-			$indexing_permission 	= (int)$row["indexing_permission"];
-			$indexing_state 		= (int)$row["current_state"];	
-			
-			if ( $doc_count && !$indexing_state ) 
-			{
-				$purge_button = "<input type='submit' value='Purge index' name='purge_index' onClick='return confirm(\"Are you sure you want to empty the whole search index?\");' />";		
-			}
-			
-			if ( !$indexing_state )
-			{
-				$delete_button = "<input style='float:right;' type='submit' value='Delete index' name='delete_index' onClick='return confirm(\"Are you sure you want to permanently delete the whole search index?\");' />";
-			}
-	
-			$statistic[5] = $row["temp_loads"];
-			$statistic[6] = $row["updated"];
-			$statistic[7] = $row["temp_loads_left"];
-			$indexing_time = "";
-			if ( !empty($row["indexing_started"]) )
-			{
-				$indexing_time = ", " .  (time() - $row["indexing_started"]) . " seconds elapsed";
-			}
-			
-			$total_documents = $doc_count + $delta_doc_count;
-		}
-		else
-		{
-			return;
-		}
-		
-		$run_indexer_button = "";
-		$test_indexer_button = "";
-		$rebuild_dictionary = "";
-		
-		# indexer is running but has been requested to be stopped 
-		if ( !$indexing_permission && $indexing_state === 1 ) 
-		{	
-			$state = "Terminating indexer...";
-		}
-		else if ( !$indexing_permission && $indexing_state === 2 ) 
-		{	
-			$state = "Terminating prefix rebuilder...";
-		}
-		else if ( !$indexing_permission && $indexing_state === 3 ) 
-		{	
-			$state = "Aborting index compression...";
-		}
-		# indexing
-		else if ( $indexing_state === 1 ) 
-		{
-			# indexer is running, show doc count etc
-			$state = "Indexing, " . $statistic[5] . " documents processed $indexing_time";
-			
-			if ( !empty($statistic[7]) )
-			{
-				$state .= ", at least " . $statistic[7] . " pageloads left";
-			}
-			
-			if ( !empty($statistic[6]) )
-			{
-				$state .= ", latest update: " . date("d.m.Y H:i:s", $statistic[6]);
-			}
-			
-			$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Stop indexer' name='stop_indexer' onClick='return confirm(\"Indexer will be stopped. Continue?\");' />";
-			
-		}
-		# rebuilding prefixes
-		else if ( $indexing_state === 2 ) 
-		{
-			# indexer is running, show doc count etc
-			$state = "Building prefixes";		
-			$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Stop rebuilder' name='stop_rebuilder' onClick='return confirm(\"Indexer will be stopped. Continue?\");' />";
-			
-		}
-		# compressing index
-		else if ( $indexing_state === 3 ) 
-		{
-			if ( $statistic[5] )
-			{
-				$done = round(($statistic[7]/$statistic[5])*100);
-			}
-			else
-			{
-				$done = 0;
-			}
-			$state = "Compressing index, $done% done";
-			$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped. Continue?\");' />";		
-		}
-		else if ( $indexing_state === 4 ) 
-		{
-			$state = "Sorting temporary prefix data";
-			$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped after sorting is done. Continue?\");' />";	
-		}
-		else if ( $indexing_state === 5 ) 
-		{
-			$state = "Sorting temporary match data";
-			$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped after sorting is done. Continue?\");' />";	
-		}
-		# idle state
-		else
-		{
-			# indexer is not runnin
-			$state = "Idle";
-			if ( !empty($statistics[6]) )
-			{
-				$state .= ", last run: " . date("d.m.Y H:i:s", $statistic[6]);
-			}
-			
-			if ( $index_type == 1 )
-			{
-				$test_indexer_button = "<input type='submit' value='Test index settings' name='test_index' onClick='return confirm(\"Seed URLs will be loaded and functionality will be checked. Continue?\");' />";
-			}
-			else
-			{
-				$test_indexer_button = "<input type='submit' value='Test index settings' name='test_index' onClick='return confirm(\"Main SQL query will be tested and functionality will be checked. Continue?\");' />";
-			}
-			
-			
-			$run_indexer_button = "<input type='submit' value='Run indexer' name='run_indexer' onClick='return confirm(\"Indexer will be started now, disregarding the indexing interval. Continue?\");' />";
-		}
-		
-		if ( $index_type == 1 )
-		{
-			$index_type_desc = "web-crawler";
-		}
-		else
-		{
-			$index_type_desc = "database index";
-		}
-		
-		?>
-		
-		<?php
-		
-		
-		$document_display = "";
-		if ( $delta_indexing == 1 ) 
-		{
-			$document_display = "<h3>Total indexed documents: $total_documents (main: $doc_count delta: $delta_doc_count)</h3>";
-		}
-		else
-		{
-			$document_display = "<h3>Total indexed documents: $total_documents</h3>";
-		}
-		
-		return "<div class='settingsbox'>
-				<form method='post' enctype='application/x-www-form-urlencoded'>
-				<input type='hidden' id='index_id' name='index_id' value='$index_id' />
-				<input type='hidden' name='action' value='runindexer' />
-				<div style='width:100%;display:inline-block;position:relative;clear:both:float:left;'>
-					<input type='button' style='display:inline-block;position:absolute;right:0;top:0;' value='Search' onClick='TogglePMBSearch();' />
-					<div style='display:inline-block;position:absolute;right:15px;top:60px;color:#222;'>CTRL+Q</div>
-					<h3>Index name: <span class='green'>$index_name</span> id: <span class='grey'>$index_id</span></h3>
-					<h3>Index type: <span class='grey'>$index_type_desc</span></h3>
-					$document_display
-					<h3>Indexer state: $state</h3>
-				</div>
-				$test_indexer_button
-				$run_indexer_button
-				$purge_button
-				$rebuild_dictionary
-				$delete_button
-				</form>
-			  </div>";
-	
-	}
-	catch ( PDOException $e ) 
-	{
-		echo $e->getMessage();
-	}
-}
 
 /* index id */
 $index_id = "";
@@ -333,9 +125,6 @@ if ( !empty($_GET["bin32replacement"]) && $_GET["bin32replacement"] === "true" )
          </div>
 
       </div>
-      
-      <script>
-	  </script>
 
    </header> <!-- Header End -->
 
@@ -360,67 +149,126 @@ if ( !empty($_GET["bin32replacement"]) && $_GET["bin32replacement"] === "true" )
 
 <?php
 
-$errors = 0;
-$folder_path   = realpath(dirname(__FILE__));
-$file_checks[] = "autoload_settings.php";
-$file_checks[] = "autostop.php";
-$file_checks[] = "data_partitioner.php";
-$file_checks[] = "db_connection.php";
-$file_checks[] = "indexer.php";
-$file_checks[] = "data_partitioner.php";
-$file_checks[] = "db_connection.php";
-$file_checks[] = "db_tokenizer.php";
-$file_checks[] = "db_tokenizer_ext.php";
-$file_checks[] = "decode_asc.php";
-$file_checks[] = "decode_desc.php";
-$file_checks[] = "finalization.php";
-$file_checks[] = "indexer.php";
-$file_checks[] = "finalization.php";
-$file_checks[] = "input_value_processor.php";
-$file_checks[] = "password.php";
-$file_checks[] = "PMBApi.php";
-$file_checks[] = "prefix_composer.php";
-$file_checks[] = "prefix_composer_ext.php";
-$file_checks[] = "prefix_compressor.php";
-$file_checks[] = "prefix_compressor_ext.php";
-$file_checks[] = "prefix_compressor_merger.php";
-$file_checks[] = "prefix_compressor_merger_ext.php";
-$file_checks[] = "process_listener.php";
-$file_checks[] = "settings.php";
-$file_checks[] = "token_compressor.php";
-$file_checks[] = "token_compressor_ext.php";
-$file_checks[] = "token_compressor_merger.php";
-$file_checks[] = "token_compressor_merger_ext.php";
-$file_checks[] = "tokenizer_functions.php";
-$file_checks[] = "web_tokenizer.php";
-$file_checks[] = "web_tokenizer_ext.php";
 
-if ( !isset($_SESSION["self_check_ok"]) )
+$errors = 0;
+$folder_path 					= realpath(dirname(__FILE__));
+$database_file_path 			= $folder_path . "/db_connection.php";
+$search_file_path 				= $folder_path . "/PMBApi.php";
+$indexer_file_path 				= $folder_path . "/indexer.php";
+$web_tokenizer_file_path 		= $folder_path . "/web_tokenizer.php";
+$db_tokenizer_file_path 		= $folder_path . "/db_tokenizer.php";
+$web_tokenizer_ext_file_path 	= $folder_path . "/web_tokenizer_ext.php";
+$db_tokenizer_ext_file_path 	= $folder_path . "/db_tokenizer_ext.php";
+$tokenizer_functions_file_path 	= $folder_path . "/tokenizer_functions.php";
+$settings_file_path 			= $folder_path . "/settings.php";
+$settings_loader_path			= $folder_path . "/autoload_settings.php";
+
+# 1. test if the database configuration file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($database_file_path) )
 {
-	foreach ( $file_checks as $filename ) 
-	{
-		$full_file_path = $folder_path."/".$filename;
-		
-		if ( !is_readable($full_file_path) )
-		{
-			++$errors;
-			$current_permissions = 0;
-			
-			if ( file_exists($full_file_path) ) 
-			{
-				$current_permissions = substr(sprintf('%o', fileperms($full_file_path)), -4);
-			}
-			
-			echo "<div class='errorbox'>
-					<h3 style='color:#ff0000;'>Error: essential file <i>$filename</i> cannot be read.</h3>
-					<p>
-					1. Please check the file exists.<br>
-					2. If necessary, chmod the file for greater permissions.<br> 
-					Current permissions: $current_permissions, required permissions: 0644 ( or greater )
-					</p>
-				  </div>";
-		}
-	}
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($database_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: database configuration file db_connection.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 2. test if the settings file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($settings_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($settings_file_path)), -4);
+
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: settings file settings.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 2. test if the settings-loader file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($settings_loader_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($settings_loader_path)), -4);
+
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: settings loader file autoload_settings.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 3. test if the search file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($search_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($search_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: search query input processor file PMBApi.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 4. test if the document processor file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($indexer_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($indexer_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: indexer file indexer.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 4. test if the document processor file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($web_tokenizer_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($web_tokenizer_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: web-crawler file web_tokenizer.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 4. test if the document processor file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($db_tokenizer_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($db_tokenizer_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: database document collector/tokenizer file db_tokenizer.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 4. test if the document processor file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($web_tokenizer_ext_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($web_tokenizer_ext_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: web-crawler file web_tokenizer_ext.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
+}
+
+# 4. test if the document processor file is readable
+if ( !isset($_SESSION["self_check_ok"]) && !is_readable($db_tokenizer_ext_file_path) )
+{
+	++$errors;
+	$current_permissions = substr(sprintf('%o', fileperms($db_tokenizer_ext_file_path)), -4);
+	
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: database document collector/tokenizer file db_tokenizer_ext.php cannot be read.</h3>
+		  	<p>Please chmod the file for greater permissions. Current permissions: $current_permissions, required permissions: 0644 ( or greater )</p>
+		  </div>";
 }
 
 # 5. check that mbstring extension is loaded
@@ -489,7 +337,6 @@ if ( !isset($_SESSION["self_check_ok"]) && !extension_loaded("curl") )
 require("db_connection.php");
 $connection = db_connection();
 
-// on error instead of an object a string will be returned
 if ( is_string($connection) )
 {
 	++$errors;
@@ -499,31 +346,43 @@ if ( is_string($connection) )
 			<p>$connection</p>
 		  </div>";
 }
-else
+
+# 6. test that the connection actually works
+try
 {
-	# 6. test that the connection actually works
-	try
+	$pdo = $connection->query("SELECT 1+1 AS Test");
+	
+	# innodb file per table
+	$tablepdo = $connection->query("SHOW VARIABLES LIKE '%innodb_file_per_table%'");
+	$innodb_file_per_table = false;
+	
+	if ( $row = $tablepdo->fetch(PDO::FETCH_ASSOC) )
 	{
-		$pdo = $connection->query("SELECT 1+1 AS Test");
-		
-		# innodb file per table
-		$tablepdo = $connection->query("SHOW VARIABLES LIKE '%innodb_file_per_table%'");
-		$innodb_file_per_table = false;
-		
-		if ( $row = $tablepdo->fetch(PDO::FETCH_ASSOC) )
+		if ( stripos($row["Value"], "ON") !== false ) 
 		{
-			if ( stripos($row["Value"], "ON") !== false ) 
-			{
-				$innodb_file_per_table = true;
-			}
+			$innodb_file_per_table = true;
+		}
+	}
+	
+	# innodb file format 
+	$tablepdo = $connection->query("SHOW VARIABLES LIKE 'innodb_file_format'");
+	$innodb_file_format_barracuda = false;
+	$innodb_file_format = "";
+	
+	# Older MySQL
+	if ( $row = $tablepdo->fetch(PDO::FETCH_ASSOC) )
+	{
+		if ( stripos($row["Value"], "Barracuda") !== false ) 
+		{
+			$innodb_file_format_barracuda = true;
 		}
 		
-		# innodb file format 
-		$tablepdo = $connection->query("SHOW VARIABLES LIKE 'innodb_file_format'");
-		$innodb_file_format_barracuda = false;
-		$innodb_file_format = "";
-		
-		# Older MySQL
+		$innodb_file_format = strtolower($row["Value"]);
+	}
+	# MySQL >= 5.7
+	else 
+	{
+		$tablepdo = $connection->query("SHOW VARIABLES LIKE 'innodb_default_row_format'");
 		if ( $row = $tablepdo->fetch(PDO::FETCH_ASSOC) )
 		{
 			if ( stripos($row["Value"], "Barracuda") !== false ) 
@@ -533,72 +392,67 @@ else
 			
 			$innodb_file_format = strtolower($row["Value"]);
 		}
-		# MySQL >= 5.7
-		else 
-		{
-			$tablepdo = $connection->query("SHOW VARIABLES LIKE 'innodb_default_row_format'");
-			if ( $row = $tablepdo->fetch(PDO::FETCH_ASSOC) )
-			{
-				if ( stripos($row["Value"], "Barracuda") !== false ) 
-				{
-					$innodb_file_format_barracuda = true;
-				}
-				
-				$innodb_file_format = strtolower($row["Value"]);
-			}
-		}
-		
-		
-		if ( !isset($_SESSION["self_check_ok"]) && !checkPMBIndexes() )
-		{
-			++$errors;
-			echo "<div class='errorbox'>
-				<h3 style='color:#ff0000;'>Error: table PMBIndexes could not be created or modified.</h3>
-			  </div>";
-		}
-		
-		try
-		{	
-			$pre_existing_indexes = array();
+	}
+
+	if ( !checkPMBIndexes() )
+	{
+		++$errors;
+		echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: table PMBIndexes could not be created or modified.</h3>
+			<p>".$e->getMessage()."</p>
+		  </div>";
+	}
 	
-			# check if any indexes are defined
-			$indexpdo = $connection->query("SELECT * FROM PMBIndexes ORDER BY ID ASC");
-					
-			while ( $row = $indexpdo->fetch(PDO::FETCH_ASSOC) )
-			{
-				$pre_existing_indexes[(int)$row["ID"]] = $row;
-			}
-			
-		}
-		catch ( PDOException $e ) 
+	try
+	{	
+		$pre_existing_indexes = array();
+
+		# check if any indexes are defined
+		$indexpdo = $connection->query("SELECT * FROM PMBIndexes ORDER BY ID ASC");
+				
+		while ( $row = $indexpdo->fetch(PDO::FETCH_ASSOC) )
 		{
-			++$errors;
-			echo "<div class='errorbox'>
-				<h3 style='color:#ff0000;'>Error: unable to check existing indexes</h3>
-				<p>".$e->getMessage()."</p>
-			  </div>";
+			$pre_existing_indexes[(int)$row["ID"]] = $row;
 		}
 		
-		if ( !empty($index_id) && !isset($pre_existing_indexes[(int)$index_id]) )
-		{
-			# if index id does not exist in the database, return to main menu
-			header("Location: control.php");
-			return;
-		}
 	}
 	catch ( PDOException $e ) 
 	{
 		++$errors;
 		echo "<div class='errorbox'>
-				<h3 style='color:#ff0000;'>Error: database communication failure</h3>
-				<p>Database connection was established, but an error happened while testing the connection: </p>
-				<p>".$e->getMessage()."</p>
-			  </div>";
+			<h3 style='color:#ff0000;'>Error: unable to check existing indexes</h3>
+			<p>".$e->getMessage()."</p>
+		  </div>";
 	}
+	
+	if ( !empty($index_id) && !isset($pre_existing_indexes[(int)$index_id]) )
+	{
+		# if index id does not exist in the database, return to main menu
+		header("Location: control.php");
+		return;
+	}
+}
+catch ( PDOException $e ) 
+{
+	++$errors;
+	echo "<div class='errorbox'>
+			<h3 style='color:#ff0000;'>Error: database communication failure</h3>
+		  	<p>Database connection was established, but an error happened while testing the connection: </p>
+			<p>".$e->getMessage()."</p>
+		  </div>";
 }
 
 # test if exec is available
-$exec_available = exec_available();
+$exec_available = true;
+if ( !function_exists('exec') || exec('echo EXEC') != 'EXEC' )
+{
+	$exec_available = false;
+}
+else if ( PHP_INT_SIZE === 4 ) 
+{
+	// exec() execution method is unavailable in 32bit environments
+	$exec_available = false;
+}
 
 # 8. test if the current directory is writable
 if ( !isset($_SESSION["self_check_ok"]) && !is_writable($folder_path) )
@@ -630,7 +484,7 @@ if ( !empty($index_id) )
 {
 	$index_type = $pre_existing_indexes[(int)$index_id]["type"];
 	
-	if ( !is_readable("settings_$index_id.txt") )
+	if ( !is_readable($folder_path . "/settings_$index_id.txt") )
 	{
 		$dummy = array("index_type" => $index_type);
 		# create the settings file with default values for current index_id
@@ -651,8 +505,8 @@ if ( !$exec_available && !empty($enable_exec) )
 {
 	echo "<div class='errorbox'>
 			<h3 style='color:#ff9c00;'>Warning: cannot launch scripts via exec() function</h3>
-		  	<p>It seems your PHP runs in safe mode and/or the exec funtion is otherwise disabled.</p>
-			<p>Please disable the safe PHP mode and/or enable the exec function.</p>
+		  	<p>It seems your PHP runs in safe mode, the exec funtion is otherwise disabled or you have a 32bit PHP runtime environment.</p>
+			<p>Please disable the safe mode, enable the exec function and/or update to a 64bit PHP environment if you want to use the exec() script execution method.</p>
 			<p>If this is not possible, please use the alternative method for launching scripts at the <a href='#execution_method'>General settings section</a>.</p>
 		  </div>";
 }
@@ -837,13 +691,9 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 	{	
 		if ( !empty($_POST["test_index"]) )
 		{
-			# generate "random" 12 byte binary string
-			$token_hex = substr(md5(rand()), 0, 24);	// for the url (24byte hex string)
-			$token_bin = pack("H*", $token_hex);		// for the database (12byte binary string)
-			
 			# run the indexer in test mode
-			$testpdo = $connection->prepare("UPDATE PMBIndexes SET indexing_permission = 1, pwd_token = ? WHERE ID = ?");
-			$testpdo->execute(array($token_bin, $index_id));
+			$testpdo = $connection->prepare("UPDATE PMBIndexes SET indexing_permission = 1 WHERE ID = ?");
+			$testpdo->execute(array($index_id));
 			
 			if ( $enable_exec ) 
 			{
@@ -853,10 +703,10 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			}
 			else
 			{
-				$url_to_exec = SITE_SCHEME . "localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=testmode&index_id=$index_id&token=$token_hex";
+				$url_to_exec = "http://localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=testmode&index_id=$index_id";
 				
 				echo "<div style='float:left;clear:both;display:inline-block;'><textarea rows='35' cols='100'>";
-				echo execWithCurl($url_to_exec, false);
+				execWithCurl($url_to_exec, false);
 				echo "</textarea></div>";
 			}
 			
@@ -867,20 +717,14 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			# set indexing state = 1, current run docloads, current run tick-tock ? 
 			# run the indexer in user mode ( this mode overrides the indexer interval time ) 
 			
-			# generate "random" 12 byte binary string
-			$token_hex = substr(md5(rand()), 0, 24);	// for the url (24byte hex string)
-			$token_bin = pack("H*", $token_hex);		// for the database (12byte binary string)
-			
-			$pdo = $connection->prepare("UPDATE PMBIndexes SET 
+			$connection->query("UPDATE PMBIndexes SET 
 								indexing_permission = 1,
 								current_state = 0,
 								temp_loads = 0,
 								temp_loads_left = 0,
-								updated = 0,
-								pwd_token = ?
-								WHERE ID = ?");
-			$pdo->execute(array($token_bin, $index_id));
-
+								updated = 0
+								WHERE ID = $index_id");
+			
 			if ( $enable_exec )
 			{
 				# launch via exec()	
@@ -888,9 +732,12 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			}
 			else
 			{
-				# launch via async curl (also provide the generated hex token as a parameter)
-				$url_to_exec = SITE_SCHEME . "localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=usermode&index_id=$index_id&token=$token_hex";
-				execWithCurl($url_to_exec, true);
+				# launch via async curl
+				$url_to_exec = "http://localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=usermode&index_id=$index_id";
+				execWithCurl($url_to_exec);
+				
+				#var_dump("executing: $url_to_exec \n");
+				#$redirect = 100;
 			}
 		}
 		else if ( !empty($_POST["purge_index"]) ) 
@@ -949,8 +796,9 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			}
 			catch ( PDOException $e ) 
 			{
+				echo $e->getMessage();
 				$connection->rollBack();
-				die("An error occurred when purging the index: " . $e->getMessage());
+				die();
 			}
 		}
 		else if ( !empty($_POST["delete_index"]) ) 
@@ -980,7 +828,7 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 			else
 			{
 				# launch via async curl
-				$url_to_exec = SITE_SCHEME . "localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=rebuildprefixes&index_id=$index_id";
+				$url_to_exec = "http://localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=rebuildprefixes&index_id=$index_id";
 				execWithCurl($url_to_exec);
 			}
 		}
@@ -995,7 +843,7 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 	if ( $redirect === 1 )
 	{
 		header("Location: control.php?index_id=$index_id");
-		return;
+		die();
 	}
 	# redirect to control panel
 	else if ( $redirect === 2 ) 
@@ -1316,12 +1164,188 @@ if ( !empty($_POST["action"]) && isset($_POST["mysql_data_dir"]) && $_POST["acti
 	return;
 } 
 
-// print the back to index selection button
-echo '<a href="control.php" style="display:inline-block;float:left;clear:both;color:#fff;padding:10px 15px;margin:0 0 40px 0;" class="button"> <i class="icon-angle-left"></i> Back to index selection</a>';
-    
-// print the index(er) status window with all the 'run indexer' buttons etc	
-echo create_index_status_window($index_id, $delta_indexing);
+try
+{
+	$indexing_state = 0;
+	$indexing_permission = 0;	
+	$doc_count = 0;
+	$purge_button = "";
+	$delete_button = "";
+
+	$statepdo = $connection->query("SELECT * FROM PMBIndexes WHERE ID = $index_id");
 	
+	if ( $row = $statepdo->fetch(PDO::FETCH_ASSOC) )
+	{
+		$doc_count 				= (int)$row["documents"];
+		$delta_doc_count		= (int)$row["delta_documents"];
+		$indexing_permission 	= (int)$row["indexing_permission"];
+		$indexing_state 		= (int)$row["current_state"];
+		
+		if ( $doc_count && !$indexing_state ) 
+		{
+			$purge_button = "<input type='submit' value='Purge index' name='purge_index' onClick='return confirm(\"Are you sure you want to empty the whole search index?\");' />";		
+		}
+		
+		if ( !$indexing_state )
+		{
+			$delete_button = "<input style='float:right;' type='submit' value='Delete index' name='delete_index' onClick='return confirm(\"Are you sure you want to permanently delete the whole search index?\");' />";
+		}
+
+		$statistic[5] = $row["temp_loads"];
+		$statistic[6] = $row["updated"];
+		$statistic[7] = $row["temp_loads_left"];
+		$indexing_time = "";
+		if ( !empty($row["indexing_started"]) )
+		{
+			$indexing_time = ", " .  (time() - $row["indexing_started"]) . " seconds elapsed";
+		}
+		
+		$total_documents = $doc_count + $delta_doc_count;
+	}
+	
+	$run_indexer_button = "";
+	$test_indexer_button = "";
+	$rebuild_dictionary = "";
+	
+	# indexer is running but has been requested to be stopped 
+	if ( !$indexing_permission && $indexing_state === 1 ) 
+	{	
+		$state = "Terminating indexer...";
+	}
+	else if ( !$indexing_permission && $indexing_state === 2 ) 
+	{	
+		$state = "Terminating prefix rebuilder...";
+	}
+	else if ( !$indexing_permission && $indexing_state === 3 ) 
+	{	
+		$state = "Aborting index compression...";
+	}
+	# indexing
+	else if ( $indexing_state === 1 ) 
+	{
+		# indexer is running, show doc count etc
+		$state = "Indexing, " . $statistic[5] . " documents processed $indexing_time";
+		
+		if ( !empty($statistic[7]) )
+		{
+			$state .= ", at least " . $statistic[7] . " pageloads left";
+		}
+		
+		if ( !empty($statistic[6]) )
+		{
+			$state .= ", latest update: " . date("d.m.Y H:i:s", $statistic[6]);
+		}
+		
+		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Stop indexer' name='stop_indexer' onClick='return confirm(\"Indexer will be stopped. Continue?\");' />";
+		
+	}
+	# rebuilding prefixes
+	else if ( $indexing_state === 2 ) 
+	{
+		# indexer is running, show doc count etc
+		$state = "Building prefixes";		
+		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Stop rebuilder' name='stop_rebuilder' onClick='return confirm(\"Indexer will be stopped. Continue?\");' />";
+		
+	}
+	# compressing index
+	else if ( $indexing_state === 3 ) 
+	{
+		if ( $statistic[5] )
+		{
+			$done = round(($statistic[7]/$statistic[5])*100);
+		}
+		else
+		{
+			$done = 0;
+		}
+		$state = "Compressing index, $done% done";
+		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped. Continue?\");' />";		
+	}
+	else if ( $indexing_state === 4 ) 
+	{
+		$state = "Sorting temporary prefix data";
+		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped after sorting is done. Continue?\");' />";	
+	}
+	else if ( $indexing_state === 5 ) 
+	{
+		$state = "Sorting temporary match data";
+		$run_indexer_button = "<input type='submit' style='background:#ff0000;color:#fff;' value='Abort compression' name='stop_indexer' onClick='return confirm(\"Index compression will be stopped after sorting is done. Continue?\");' />";	
+	}
+	# idle state
+	else
+	{
+		# indexer is not runnin
+		$state = "Idle";
+		if ( !empty($statistics[6]) )
+		{
+			$state .= ", last run: " . date("d.m.Y H:i:s", $statistic[6]);
+		}
+		
+		if ( $index_type == 1 )
+		{
+			$test_indexer_button = "<input type='submit' value='Test index settings' name='test_index' onClick='return confirm(\"Seed URLs will be loaded and functionality will be checked. Continue?\");' />";
+		}
+		else
+		{
+			$test_indexer_button = "<input type='submit' value='Test index settings' name='test_index' onClick='return confirm(\"Main SQL query will be tested and functionality will be checked. Continue?\");' />";
+		}
+		
+		
+		$run_indexer_button = "<input type='submit' value='Run indexer' name='run_indexer' onClick='return confirm(\"Indexer will be started now, disregarding the indexing interval. Continue?\");' />";
+		#$rebuild_dictionary = "<input type='submit' value='Rebuild prefixes' name='rebuild_prefixes' onClick='return confirm(\"Prefix-dictionary will be rebuild. This if necessary only if pre-existing search index&#39;s prefix-setting are modified. Continue?\");' />";
+	}
+	
+	if ( $index_type == 1 )
+	{
+		$index_type_desc = "web-crawler";
+	}
+	else
+	{
+		$index_type_desc = "database index";
+	}
+	
+	?>
+    
+    <a href="control.php" style="display:inline-block;float:left;clear:both;color:#fff;padding:10px 15px;margin:0 0 40px 0;" class="button"> <i class="icon-angle-left"></i> Back to index selection</a>
+    
+    <?php
+	
+	
+	echo "<div class='settingsbox'>
+			<form action='control.php' method='post' enctype='application/x-www-form-urlencoded'>
+			<input type='hidden' name='index_id' value='$index_id' />
+			<input type='hidden' name='action' value='runindexer' />
+			<div style='width:100%;display:inline-block;position:relative;clear:both:float:left;'>
+				<input type='button' style='display:inline-block;position:absolute;right:0;top:0;' value='Search' onClick='TogglePMBSearch();' />
+				<div style='display:inline-block;position:absolute;right:15px;top:60px;color:#222;'>CTRL+Q</div>
+				<h3>Index name: <span class='green'>$index_name</span> id: <span class='grey'>$index_id</span></h3>
+				<h3>Index type: <span class='grey'>$index_type_desc</span></h3>";
+				
+				if ( $delta_indexing == 1 ) 
+				{
+					echo "<h3>Total indexed documents: $total_documents (main: $doc_count delta: $delta_doc_count)</h3>";
+				}
+				else
+				{
+					echo "<h3>Total indexed documents: $total_documents</h3>";
+				}
+				
+		echo"<h3>Indexer state: $state</h3>
+			</div>
+			$test_indexer_button
+			$run_indexer_button
+			$purge_button
+			$rebuild_dictionary
+			$delete_button
+			</form>
+		  </div>";
+
+}
+catch ( PDOException $e ) 
+{
+	echo $e->getMessage();
+}
+
 # charset
 if ( empty($charset) )
 {
@@ -2550,7 +2574,7 @@ if ( !$exec_available )
    
  
    
-   <div id='pmblivesearch' class='realhidden'>
+   <div id='pmblivesearch' class='hidden'>
        
         <form id='pmblivesearchform'>
     		<input type='hidden' name='index_name' id='index_name' value='<?php echo $index_name; ?>'>

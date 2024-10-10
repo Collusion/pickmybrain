@@ -36,6 +36,20 @@ SetProcessState($index_id, $process_number, 1);
 	
 register_shutdown_function($shutdown_function);
 
+// test & "unpack" the custom user defined functions here
+$enabled_custom_functions = array();
+if ( !empty($custom_functions) ) 
+{
+	// convert to an associative array
+	$func_array = test_custom_functions(implode("\n", $custom_functions), 1, "custom_functions.php");
+	if ( !empty($func_array) ) 
+	{
+		// deploy only if a test is passed
+		$enabled_custom_functions = $func_array;
+		$log .= "Custom functions defined: " . implode(", ", array_keys($func_array)) . "\n";
+	}
+}
+
 define("CHARSET_REGEXP", "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "]/u");
 
 $forbidden_tokens[""] 	= 1;
@@ -176,13 +190,13 @@ try
 				die("already running");
 			}
 			# lastest indexing timestamp
-			else if ( $indexing_interval && (int)$row["updated"] + ($indexing_interval*60) > time() && !$user_mode && !$test_mode )  
+			else if ( $indexing_interval && $row["updated"] + ($indexing_interval*60) > time() && !$user_mode && !$test_mode )  
 			{
 				die("indexing interval is enabled - you are trying to index too soon\n");
 			}
 			
-			$min_doc_id = (int)$row["max_id"]+1;
-			$delta_document_start_count = (int)$row["delta_documents"];
+			$min_doc_id = (string)$row["max_id"]+1;
+			$delta_document_start_count = (string)$row["delta_documents"];
 			
 			if ( $row["documents"] > 0 ) 
 			{
@@ -265,8 +279,8 @@ try
 			{
 				$connection->exec("DROP TABLE IF EXISTS PMBDocinfo".$index_suffix."_temp;
 							CREATE TABLE IF NOT EXISTS PMBDocinfo".$index_suffix."_temp (
-							 ID int(11) unsigned NOT NULL,
-							 avgsentiscore tinyint(4) NOT NULL,
+							 ID int(11) unsigned NOT NULL DEFAULT '0',
+							 avgsentiscore tinyint(4) NOT NULL DEFAULT '0',
 							 PRIMARY KEY (ID),
 							 KEY avgsentiscore (ID, avgsentiscore)	
 							) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql");	
@@ -308,7 +322,7 @@ try
 	{
 		if ( !empty($data_partition) )
 		{
-			$min_doc_id = (int)$data_partition[0];
+			$min_doc_id = (string)$data_partition[0];
 		}
 		else
 		{
@@ -338,8 +352,8 @@ try
 				$connection->query("UPDATE PMBIndexes SET $doc_counter_target_column = 0 WHERE ID = $index_id");
 				$connection->query("DROP TABLE IF EXISTS $docinfo_target_table");
 				$connection->query("CREATE TABLE IF NOT EXISTS $docinfo_target_table (
-					 ID int(11) unsigned NOT NULL,
-					 avgsentiscore tinyint(4) NOT NULL,
+					 ID int(11) unsigned NOT NULL DEFAULT '0',
+					 avgsentiscore tinyint(4) NOT NULL DEFAULT '0',
 					 PRIMARY KEY (ID),
 					 KEY avgsentiscore (avgsentiscore)	
 					) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql");
@@ -359,7 +373,7 @@ try
 	
 	if ( $sentiment_analysis )
 	{
-		$senti_sql_column = "sentiscore tinyint(3) NOT NULL,";
+		$senti_sql_column = "sentiscore tinyint(3) NOT NULL DEFAULT '0',";
 		$senti_sql_index_column = ",sentiscore";
 	}
 	
@@ -378,10 +392,10 @@ try
 
 			$connection->exec("DROP TABLE IF EXISTS PMBdatatemp$index_suffix;
 								CREATE TABLE IF NOT EXISTS PMBdatatemp$index_suffix (
-								checksum int(10) unsigned NOT NULL,
-								minichecksum smallint(7) unsigned NOT NULL,
-								doc_id int(10) unsigned NOT NULL,
-								field_pos int(10) unsigned NOT NULL,
+								checksum int(10) unsigned NOT NULL DEFAULT '0',
+								minichecksum smallint(7) unsigned NOT NULL DEFAULT '0',
+								doc_id int(10) unsigned NOT NULL DEFAULT '0',
+								field_pos int(10) unsigned NOT NULL DEFAULT '0',
 								".$senti_sql_column."
 							 	KEY (checksum,minichecksum,doc_id,field_pos".$senti_sql_index_column.")
 								) $temporary_table_type PACK_KEYS=1");
@@ -389,9 +403,9 @@ try
 			# create new temporary tables				   
 			$connection->exec("DROP TABLE IF EXISTS PMBpretemp$index_suffix;
 								CREATE TABLE IF NOT EXISTS PMBpretemp$index_suffix (
-								checksum int(10) unsigned NOT NULL,
-								token_checksum int(10) unsigned NOT NULL,
-								cutlen tinyint(3) unsigned NOT NULL,
+								checksum int(10) unsigned NOT NULL DEFAULT '0',
+								token_checksum int(10) unsigned NOT NULL DEFAULT '0',
+								cutlen tinyint(3) unsigned NOT NULL DEFAULT '0',
 								KEY (checksum, cutlen, token_checksum)
 								) $temporary_table_type PACK_KEYS=1");
 			
@@ -408,9 +422,9 @@ try
 				# create new temporary tables	  KEY checksum (checksum,minichecksum,ID)	   
 				$connection->exec("DROP TABLE IF EXISTS PMBtoktemp$index_suffix;
 									CREATE TABLE IF NOT EXISTS PMBtoktemp$index_suffix (
-									 token varbinary(40) NOT NULL,
-									 checksum int(10) unsigned NOT NULL,
-									 minichecksum smallint(5) unsigned NOT NULL,
+									 token varbinary(40) NOT NULL DEFAULT '',
+									 checksum int(10) unsigned NOT NULL DEFAULT '0',
+									 minichecksum smallint(5) unsigned NOT NULL DEFAULT '0',
 									 PRIMARY KEY (checksum,minichecksum)
 									) ENGINE=MYISAM DEFAULT CHARSET=utf8 $data_dir_sql");
 			}
@@ -635,6 +649,15 @@ while ( true )
 	if ( $row = $mainpdo->fetch(PDO::FETCH_ASSOC) ) 
 	{
 		++$fetched;
+		
+		# execute custom functions, if defined
+		if ( !empty($enabled_custom_functions) ) 
+		{
+			foreach ( $enabled_custom_functions as $f_name => $f_param )
+			{
+				$row = call_user_func($f_name, $row, $f_param);
+			}
+		}
 	}
 	else
 	{
@@ -657,7 +680,7 @@ while ( true )
 		if ( $i === 0 ) 
 		{
 			# document id ( first attribute ) 
-			$document_id = (int)$column_value;
+			$document_id = $column_value;
 		}
 		else if ( empty($reverse_attributes[$column_name]) && $column_name != "pmb_language" )
 		{
@@ -883,17 +906,6 @@ while ( true )
 		}
 		
 		$fields[$f_id] = $field;
-	}
-	
-	/*
-		INSERT CUSTOM FUNCTIONS HERE
-	*/
-	if ( !empty($approved_custom_functions) )
-	{
-		foreach ( $approved_custom_functions as $f_name ) 
-		{
-			
-		}
 	}
 	
 	foreach ( $fields as $f_id => $field ) 

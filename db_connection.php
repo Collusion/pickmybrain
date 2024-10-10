@@ -39,7 +39,8 @@ function db_connection($buffered = true)
 										PDO::ATTR_TIMEOUT 					=> 10, 
 										PDO::ATTR_ERRMODE 					=> PDO::ERRMODE_EXCEPTION, 
 										PDO::ATTR_PERSISTENT 				=> false,
-										PDO::MYSQL_ATTR_USE_BUFFERED_QUERY 	=> $buffered
+										PDO::MYSQL_ATTR_USE_BUFFERED_QUERY 	=> $buffered,
+										PDO::ATTR_DEFAULT_FETCH_MODE 		=> PDO::FETCH_ASSOC
 									  )
 							 );  
 	} 

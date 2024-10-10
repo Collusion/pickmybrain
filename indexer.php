@@ -65,6 +65,9 @@ else
 # check if sort is supported
 $enable_ext_sorting = isSortSupported();
 
+# check that main PMBIndexes table is up-to-date
+checkPMBIndexes();
+
 # check that table definitions are up-to-date
 check_tables($index_id);
 

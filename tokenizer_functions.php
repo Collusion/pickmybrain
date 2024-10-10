@@ -257,39 +257,31 @@ class PackedIntegers
 
 		return $compressed;
 	}
-}
+} 
 
-/* check if all required 32bit binaries are installed by trying to find a predifined keyword in them
-return values:
-	- array of file names that were not detected to be 32bit compatible 
-	- empty array if all checked files seemed to be 32bit compatible
-	*/
 function check_32bit_binaries()
 {
-	$files   = array();
-	$files[] = "db_tokenizer.php";
-	$files[] = "decode_asc.php";
-	$files[] = "decode_desc.php";
-	$files[] = "PMBApi.php";
-	$files[] = "prefix_composer.php";
-	$files[] = "prefix_compressor.php";
-	$files[] = "prefix_compressor_merger.php";
-	$files[] = "token_compressor.php";
-	$files[] = "token_compressor_merger.php";
-	$files[] = "tokenizer_functions.php";
-	$files[] = "web_tokenizer.php";
+	$result = array();
+
+	if ( strpos(file_get_contents("db_tokenizer.php"), 				"32_BIT_VERSION") === false ) $result[] = "db_tokenizer.php";
+	if ( strpos(file_get_contents("decode_asc.php"), 				"32_BIT_VERSION") === false ) $result[] = "decode_asc.php";
+	if ( strpos(file_get_contents("decode_desc.php"), 				"32_BIT_VERSION") === false ) $result[] = "decode_desc.php";
+	if ( strpos(file_get_contents("PMBApi.php"), 					"32_BIT_VERSION") === false ) $result[] = "PMBApi.php";
+	if ( strpos(file_get_contents("prefix_composer.php"), 			"32_BIT_VERSION") === false ) $result[] = "prefix_composer.php";
+	if ( strpos(file_get_contents("prefix_compressor.php"), 		"32_BIT_VERSION") === false ) $result[] = "prefix_compressor.php";
+	if ( strpos(file_get_contents("prefix_compressor_merger.php"), 	"32_BIT_VERSION") === false ) $result[] = "prefix_compressor_merger.php";
+	if ( strpos(file_get_contents("token_compressor.php"), 			"32_BIT_VERSION") === false ) $result[] = "token_compressor.php";
+	if ( strpos(file_get_contents("token_compressor_merger.php"), 	"32_BIT_VERSION") === false ) $result[] = "token_compressor_merger.php";
+	if ( strpos(file_get_contents("tokenizer_functions.php"), 		"32_BIT_VERSION") === false ) $result[] = "tokenizer_functions.php";
+	if ( strpos(file_get_contents("web_tokenizer.php"), 			"32_BIT_VERSION") === false ) $result[] = "web_tokenizer.php";
 	
-	foreach ( $files as $i => $filename ) 
-	{
-		// read 500 bytes of the file and check if the read data contains the identifier created for the 32 bit binaries
-		if ( strpos(file_get_contents($filename, FALSE, NULL, 0, 500), "32_BIT_VERSION") !== false )
-		{
-			// if 32bit identifier was found, remove the file from the list
-			unset($files[$i]);
-		}
-	}
-	
-	return $files;
+	return $result;
+}
+
+/* placeholder function */
+function test_custom_functions()
+{
+	return false;
 }
 
 function exec_available()
@@ -367,42 +359,46 @@ function checkPMBIndexes()
 {
 	$table_sql = "CREATE TABLE PMBIndexes (
 	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-	 name varbinary(20) NOT NULL,
-	 type tinyint(3) unsigned NOT NULL,
-	 comment varbinary(255) NOT NULL,
+	 name varbinary(20) NOT NULL DEFAULT '',
+	 type tinyint(3) unsigned NOT NULL DEFAULT '',
+	 comment varbinary(255) NOT NULL DEFAULT '',
 	 documents int(10) unsigned NOT NULL DEFAULT '0',
+	 min_id int(10) unsigned NOT NULL DEFAULT '0',
 	 max_id int(10) unsigned NOT NULL DEFAULT '0',
+	 max_delta_id int(10) unsigned NOT NULL DEFAULT '0',
   	 delta_documents int(10) unsigned NOT NULL DEFAULT '0',
 	 latest_rotation int(10) unsigned NOT NULL DEFAULT '0',
-	 updated int(10) unsigned NOT NULL,
-	 indexing_permission tinyint(3) unsigned NOT NULL,
+	 updated int(10) unsigned NOT NULL DEFAULT '0',
+	 indexing_permission tinyint(3) unsigned NOT NULL DEFAULT '0',
 	 pwd_token binary(12) DEFAULT NULL,
-	 indexing_started int(10) unsigned NOT NULL,
-	 current_state tinyint(3) unsigned NOT NULL,
-	 temp_loads int(8) unsigned NOT NULL,
-	 temp_loads_left int(8) unsigned NOT NULL,
-	 disabled_documents mediumblob NOT NULL,
+	 indexing_started int(10) unsigned NOT NULL DEFAULT '0',
+	 current_state tinyint(3) unsigned NOT NULL DEFAULT '0',
+	 temp_loads int(8) unsigned NOT NULL DEFAULT '0',
+	 temp_loads_left int(8) unsigned NOT NULL DEFAULT '0',
+	 disabled_documents mediumblob NOT NULL DEFAULT '',
 	 PRIMARY KEY (ID),
 	 UNIQUE KEY name (name)
 	) ENGINE=MYISAM DEFAULT CHARSET=utf8";
 	
 	$required_columns = array(
 	"ID" 				=> "ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT",
-	"name" 				=> "name varbinary(20) NOT NULL",
-	"type" 				=> "type tinyint(3) unsigned NOT NULL",
-	"comment" 			=> "comment varbinary(255) NOT NULL",
+	"name" 				=> "name varbinary(20) NOT NULL DEFAULT ''",
+	"type" 				=> "type tinyint(3) unsigned NOT NULL DEFAULT ''",
+	"comment" 			=> "comment varbinary(255) NOT NULL DEFAULT ''",
 	"documents" 		=> "documents int(10) unsigned NOT NULL DEFAULT '0'",
+	"min_id" 			=> "min_id int(10) unsigned NOT NULL DEFAULT '0'",
 	"max_id" 			=> "max_id int(10) unsigned NOT NULL DEFAULT '0'",
+	"max_delta_id" 		=> "max_delta_id int(10) unsigned NOT NULL DEFAULT '0'",
 	"delta_documents" 	=> "delta_documents int(10) unsigned NOT NULL DEFAULT '0'",
 	"latest_rotation" 	=> "latest_rotation int(10) unsigned NOT NULL DEFAULT '0'",
-	"updated"			 => "updated int(10) unsigned NOT NULL",
-	"indexing_permission" => "indexing_permission tinyint(3) unsigned NOT NULL",
+	"updated"			 => "updated int(10) unsigned NOT NULL DEFAULT '0'",
+	"indexing_permission" => "indexing_permission tinyint(3) unsigned NOT NULL DEFAULT '0'",
 	"pwd_token" 		=> "pwd_token binary(12) DEFAULT NULL",
-	"indexing_started" 	=> "indexing_started int(10) unsigned NOT NULL",
-	"current_state" 	=> "current_state tinyint(3) unsigned NOT NULL",
-	"temp_loads" 		=> "temp_loads int(8) unsigned NOT NULL",
-	"temp_loads_left" 	=> "temp_loads_left int(8) unsigned NOT NULL",
-	"disabled_documents" => "disabled_documents mediumblob NOT NULL"
+	"indexing_started" 	=> "indexing_started int(10) unsigned NOT NULL DEFAULT '0'",
+	"current_state" 	=> "current_state tinyint(3) unsigned NOT NULL DEFAULT '0'",
+	"temp_loads" 		=> "temp_loads int(8) unsigned NOT NULL DEFAULT '0'",
+	"temp_loads_left" 	=> "temp_loads_left int(8) unsigned NOT NULL DEFAULT '0'",
+	"disabled_documents" => "disabled_documents mediumblob NOT NULL DEFAULT ''"
 	);
 	
 	try
@@ -541,7 +537,6 @@ function deleteIndex($index_id)
 	return true;
 }
 
-
 function execWithCurl($url, $async = true)
 {
 	$url = str_replace("localhost", $_SERVER['SERVER_NAME'], $url);
@@ -554,7 +549,7 @@ function execWithCurl($url, $async = true)
 	}
 	
 	# maintain session through curl request
-	if ( !empty($_SESSION["pmb_logged_in"]) && $async === false )
+	if ( !empty($_SESSION["pmb_logged_in"]) )
 	{
 		$useragent = $_SERVER['HTTP_USER_AGENT'];
 		$strCookie = 'PHPSESSID=' . $_COOKIE['PHPSESSID'] . '; path=/';
@@ -566,19 +561,19 @@ function execWithCurl($url, $async = true)
 	}
 	
 	$options = array(
-        CURLOPT_RETURNTRANSFER 	=> true,     	// do not echo web page, return it as variable ( curl_exec() )
-        CURLOPT_HEADER         	=> false,    	// don't return headers
-        CURLOPT_FOLLOWLOCATION 	=> true,     	// follow redirects
-        CURLOPT_ENCODING       	=> "",       	// handle all encodings
-        CURLOPT_USERAGENT      	=> $useragent,  // who am i
-        CURLOPT_AUTOREFERER    	=> true,     	// set referer on redirect
-        CURLOPT_CONNECTTIMEOUT 	=> 10,      	// timeout on connect
-        CURLOPT_TIMEOUT      	=> $timeout, 	// timeout on response
-		CURLOPT_FRESH_CONNECT 	=> $async		// 
+        CURLOPT_RETURNTRANSFER 	=> false,     // do not return web page
+        CURLOPT_HEADER         	=> false,    // don't return headers
+        CURLOPT_FOLLOWLOCATION 	=> true,     // follow redirects
+        CURLOPT_ENCODING       	=> "",       // handle all encodings
+        CURLOPT_USERAGENT      	=> $useragent,    // who am i
+        CURLOPT_AUTOREFERER    	=> true,     // set referer on redirect
+        CURLOPT_CONNECTTIMEOUT 	=> 10,      // timeout on connect
+        CURLOPT_TIMEOUT      	=> $timeout,      // timeout on response
+		CURLOPT_FRESH_CONNECT 	=> $async
     );
 	
 	# maintain session through curl request
-	if ( !empty($_SESSION["pmb_logged_in"]) && $async === false )
+	if ( !empty($_SESSION["pmb_logged_in"]) )
 	{
 		$options += array(CURLOPT_COOKIE => $strCookie);
 	}
@@ -588,9 +583,13 @@ function execWithCurl($url, $async = true)
     $content = curl_exec( $ch );
     curl_close( $ch );
 	
+	if ( empty($async) )
+	{
+		echo $content;
+	}
+	
 	return $content;
 }
-
 
 function expand_synonyms($synonyms) 
 {
@@ -861,7 +860,7 @@ function test_database_settings($index_id, &$log = "", &$number_of_fields = 0, &
 						++$c;
 					}
 					
-					$data_array[(int)$main_id_value] = 1;
+					$data_array[(string)$main_id_value] = 1;
 					++$data_count;
 					
 					if ( $e_count > 0 )
@@ -2016,22 +2015,6 @@ function removedomain($url)
 	$fragment = isset($p['fragment']) ? '#' . $p['fragment'] : '';
 	
 	return "$path$query$fragment";
-}
-
-/* 
-special implementation for the crc32 function 
-returns a crc32 value of the provided string as an unsigned integer in string format
-platform independent (works in both x86 and x64 PHP environments)
-*/
-function uint_crc32_string($str)
-{
-	$checksum = crc32($str);
-	if ( PHP_INT_SIZE === 4 && $checksum < 0 ) 
-	{
-		return (string)($checksum+4294967296);
-	}
-	
-	return "$checksum";
 }
 
 function DeltaVBencode(array $integers, array $hex_lookup, $start_offset = 0)

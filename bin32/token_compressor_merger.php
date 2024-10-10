@@ -213,13 +213,14 @@ try
 		
 		if ( $row )
 		{
-			$checksum 	= $row["checksum"];
-			$doc_id 	= $row["doc_id"];
+			$checksum 	= (string)$row["checksum"];
+			$doc_id 	= (string)$row["doc_id"];
 			$token		= $row["token"];
 			$combined	= $row["combined"];
 		}
 		else
 		{
+			echo "LAST ROW - counter: $counter process_number: $process_number \n";
 			$last_row = true;
 			
 			if ( $counter === 1 ) 
@@ -455,6 +456,11 @@ try
 							unset($oldrow_copy);
 							
 						}
+						else
+						{
+							echo "NEW: checksum: $min_checksum min_token: $min_token \n";
+							echo "OLD: checksum: ".$oldrow["checksum"]." min_token: ".$oldrow["token"]." \n\n";
+						}
 					}
 					
 					unset($oldrow_copy);
@@ -599,6 +605,7 @@ try
 	# remnants of the write buffer
 	if ( !empty($insert_sql) )
 	{
+		echo "Writing the remnants of insert_sql \n";
 		$token_insert_time_start = microtime(true);
 		$insert_sql[0] = " ";
 		$ins = $connection->query("INSERT INTO $target_table (checksum, token, metaphone, doc_matches, max_doc_id, doc_ids) VALUES $insert_sql");
@@ -654,6 +661,7 @@ echo "All token processes have now finished, $interval seconds elapsed, starting
 echo "Oldreads: $oldreads \n";
 echo "Latent oldreads: $latent_oldreads \n";
 
+
 try
 {
 	# remove the temporary table
@@ -663,6 +671,7 @@ catch ( PDOException $e )
 {
 	echo "An error occurred when removing the temporary data: " . $e->getMessage() . "\n";
 }
+
 
 try
 {
@@ -721,15 +730,19 @@ try
 	
 	$transfer_time_end = microtime(true)-$transfer_time_start;
 	if ( $dist_threads > 1 ) echo "Transferring token data into one table took $transfer_time_end seconds \n";
+
 	
 	$drop_start = microtime(true);
 	$connection->beginTransaction();
 	# remove the old table and rename the new one
 	$connection->query("DROP TABLE $clean_slate_target");
 	$connection->query("ALTER TABLE $target_table RENAME TO $clean_slate_target");
-	
+	#$connection->query("ALTER TABLE $clean_slate_target ADD INDEX(metaphone, doc_matches)"); # add metaphone index
+		
 	$connection->commit();
 	$drop_end = microtime(true) - $drop_start;
+	
+	
 }
 catch ( PDOException $e ) 
 {

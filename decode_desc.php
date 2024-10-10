@@ -5,7 +5,6 @@
 				$finished = 0;
 				$skipped = 0;
 				$end = 0;
-				++$loop;
 
 				# pre-insert max document ids
 				if ( !empty($maximum_doc_ids_vals) )
@@ -37,7 +36,25 @@
 
 				foreach ( $sorted_groups as $group => $token_group ) 
 				{
-					$group_bits = 1 << $token_group;
+					$original_token_group = $group;
+					
+					if ( isset($duplicate_groups[$group]) ) 
+					{
+						# overwrite group/token group values if this is a duplicate keyword
+						if ( $fast_external_sort ) 
+						{
+							++$skipped;
+							continue;
+						}
+						
+						$group = $duplicate_groups[$group];
+						$token_group = $sorted_groups[$group];
+					}
+					else
+					{
+						$group_bits = 1 << $token_group; # this is a reference to the keyword order number
+					}
+					
 					$encoded_group = $this->hex_lookup_encode[$group];
 					
 					if ( $encode_delta[$group] < $min_doc_id )  
@@ -184,11 +201,11 @@
 						{	
 							if ( !empty($loop_doc_positions[$doc_id]) ) 
 							{
-								$loop_doc_positions[$doc_id] 	.= $bin_sep.$encoded_group.$data[$l];
+								$loop_doc_positions[$doc_id] .= $bin_sep.$encoded_group.$data[$l];
 							}
 							else
 							{
-								$loop_doc_positions[$doc_id] 	= $encoded_group.$data[$l];
+								$loop_doc_positions[$doc_id] = $encoded_group.$data[$l];
 							}
 							
 							--$l;
@@ -210,37 +227,33 @@
 				# all groups have finished, lets check the results
 				if ( $finished >= $group_count || $skipped >= $group_count || $stop ) 
 				{
-					if ( $stop ) 
+					if ( $stop && !empty($t_matches_awaiting) ) 
 					{
-						if ( !empty($t_matches_awaiting) )
-						{							
-							foreach ( $t_matches_awaiting as $doc_id => $data ) 
+						foreach ( $t_matches_awaiting as $doc_id => $data ) 
+						{
+							if ( $doc_id >= $min_doc_id && $doc_id <= $max_doc_id )
 							{
-								if ( $doc_id >= $min_doc_id && $doc_id <= $max_doc_id )
+								foreach ( $t_matches_awaiting[$doc_id] as $group => $bits ) 
 								{
-									foreach ( $t_matches_awaiting[$doc_id] as $group => $bits ) 
-									{
-										$undone_values[$group] = 1;
-										$temp_doc_ids_storage[$group][$doc_id] = $bits;
-										
-										if ( !empty($t_matches[$doc_id]) )
-										{
-											$t_matches[$doc_id] |= $bits;
-										}
-										else
-										{
-											$t_matches[$doc_id] = $bits;
-										}
-									}
+									$undone_values[$group] = 1;
+									$temp_doc_ids_storage[$group][$doc_id] = $bits;
 									
-									unset($t_matches_awaiting[$doc_id]);
+									if ( !empty($t_matches[$doc_id]) )
+									{
+										$t_matches[$doc_id] |= $bits;
+									}
+									else
+									{
+										$t_matches[$doc_id] = $bits;
+									}
 								}
+								
+								unset($t_matches_awaiting[$doc_id]);
 							}
 						}
 					}
 					
 					$t = 0;
-					$prev_tmp_matches = $tmp_matches;
 					$total_documents += count($t_matches);
 				
 					# get documents match position data
@@ -256,9 +269,9 @@
 								++$tmp_matches;	
 								continue;
 							}
-							else if ( $exact_mode ) 
+							else if ( $exact_group_pairing_lookup ) 
 							{
-								$exact_ids_lookup_copy = $exact_ids_lookup;
+								$exact_group_pairing_lookup_copy = $exact_group_pairing_lookup;
 							}
 
 							# reset old variables
@@ -268,15 +281,19 @@
 							$data_len		 	= strlen($loop_doc_positions[$doc_id]);
 							$phrase_score 		= 0;
 							$bm25_score 		= 0;
-							$self_score 		= 0;
 							$maxscore_total 	= 0;
 							$sentiscore			= 0;
-							$position_storage 	= $last_pos_lookup;	
 							$strict_match 		= 0;
+							$tmp_position_storage 	= array();
+							$prev_position_storage	= array();
+							$forbidden_position_storage = array();
 							
 							$t_group 			= $this->hex_lookup_decode[$match_position_string[0]];
 							$qind				= $sorted_groups[$t_group];
-							$prev_group 		= $qind-1;	
+							$prev_group 		= $qind; # we need to set this equal to $qind ( the current main group )
+							$skip_group_id		= 0; # skip this group id ($qind), 0 by default (no pair matching for the first group)						
+							$document_field_hits = 0; 	# holds individual field bits found from this document
+							$group_field_hits	= 0; 	# holds group specific field bits  => if/when this is equal to $this->all_field_bits_set => skip rest of the group ($qind)
 	
 							# initialize temporary array variables for each token group
 							$phrase_data[$qind] 		= 0; # for phrase score bits
@@ -287,8 +304,7 @@
 							$shift = 0;
 							$delta = 1;
 							$x = 0;
-							
-									
+	
 							for ( $i = 1 ; $i < $data_len ; ++$i )
 							{
 								$bits = $this->hex_lookup_decode[$match_position_string[$i]];
@@ -299,17 +315,31 @@
 									$document_count[$qind] += $x - $this->sentiment_index;
 									
 									# zero, as in binary separator
-									# token changes
+									# token changes (as in token subgroup changes)
 									
 									++$i; # first char will be the group
 									$t_group 	= $this->hex_lookup_decode[$match_position_string[$i]];
-									$qind		= $sorted_groups[$t_group];
-									$prev_group = $qind-1;
-			
+									$tmp_group	= $sorted_groups[$t_group];
+									
+									# check if main token group_id changes
+									# this should execute only when $qind > 0 
+									if ( $qind !== $tmp_group ) 
+									{
+										$prev_group = $qind;
+										$qind = $tmp_group;
+										$prev_position_storage 	= $forbidden_position_storage + $tmp_position_storage;
+										$tmp_position_storage 	= array();
+	
+										# store field_bits from the old group
+										$phrase_data[$prev_group] = $group_field_hits;
+
+										# reset group specific field bit flags
+										$group_field_hits = 0; 
+									}
+
 									if ( !isset($best_match_score[$qind]) )
 									{
 										# initialize temporary array variables for each token group
-										$phrase_data[$qind] 		= 0; # for phrase score bits
 										$document_count[$qind] 		= 0; # how many documents for this token group
 										$best_match_score[$qind] 	= $score_lookup_alt[$t_group]; # maxscore ( token quality )
 									}
@@ -324,7 +354,6 @@
 									$shift = 0;
 									$delta = 1;
 									$x = 0;
-									
 								}
 								else if ( $bits < 128 ) 
 								{
@@ -361,28 +390,48 @@
 
 										if ( $field_id_bit & $this->enabled_fields )
 										{
-											$field_pos = $delta >> $this->field_id_width;
-	
-											# self score match
-											$self_score |= $field_id_bit;
-	
-											# if there is a match in the same field 
-											if ( $position_storage[$field_id_bit][$prev_group] === $field_pos-1 )
-											{
-												$phrase_data[$qind] |= $field_id_bit;
+											# which field contain the current keyword ? 
+											$document_field_hits |= $field_id_bit;
 
-												if ( $exact_mode ) 
+											# skip token pair lookup if: current group is 0, or the group is set to be skipped
+											if ( $qind !== $skip_group_id ) 
+											{
+												# if previous group matched the previous field position
+												if ( !empty($prev_position_storage[$delta]) ) 
 												{
-													unset($exact_ids_lookup_copy[(1<<$qind)|(1<<$prev_group)]);	
+													# we have a matching pair ! 
+													# check if there's a match already for this field 
+													if ( !($group_field_hits & $field_id_bit) ) 
+													{
+														# store group field hits into a temporary variable
+														$group_field_hits |= $field_id_bit;
+														
+														# if exact pair matching is enabled
+														if ( $exact_group_pairing_lookup_copy ) 
+														{
+															# reset the bit denoting previous group 
+															$exact_group_pairing_lookup_copy &= ~(1 << $prev_group);
+														}
+
+														# if all possible/enabled fields have already been matched, skip the rest of the group $qind
+														if ( $group_field_hits === $this->enabled_fields ) 
+														{
+															$skip_group_id = $qind;
+														}
+														
+														# do not rematch same positions (applies for queries with multiple identical keywords)
+														$forbidden_position_storage[$delta] = 0;
+													}
 												}
 											}
-											# if field_pos is 1 and token group is 0 -> strict match
-											else if ( $field_pos+$qind === 1 ) 
+											# if delta value is below $this->first_of_field, the token's field_pos is 1 
+											else if ( $delta < $this->first_of_field ) 
 											{
+												# this token is in the first possible position in it's field
 												$strict_match = 1;
 											}
 											
-											$position_storage[$field_id_bit][$qind] = $field_pos;
+											$tmp_position_storage[$delta + $this->doc_id_distance] = 1;
 										}
 									}
 									
@@ -390,13 +439,13 @@
 								}
 							}
 
-							if ( !$self_score ) 
+							if ( !$document_field_hits ) 
 							{
 								# self_score is zero => none of the keywords were found on enabled fields
 								# this document is not a match
 								continue;	
 							}
-							else if ( $exact_mode && !empty($exact_ids_lookup_copy) )
+							else if ( $exact_group_pairing_lookup_copy )
 							{
 								# exact mode is on but document does not 
 								# satisfy strict keyword order conditions
@@ -418,8 +467,14 @@
 								continue;
 							}
 							
+							# set phrase score for the final group
+							$phrase_data[$qind] = $group_field_hits;
+							
 							# how many matches for this keyword
 							$document_count[$qind] += $x - $this->sentiment_index;
+							$bm25_score 		= 0;
+							$phrase_score 		= 0;
+							$maxscore_total 	= 0;
 							
 							foreach ( $phrase_data as $vind => $value ) 
 							{
@@ -438,7 +493,7 @@
 							}
 
 							# calculate self_score
-							$final_self_score = $weighted_score_lookup[$self_score];
+							$final_self_score = $weighted_score_lookup[$document_field_hits];
 							
 							# is quality scoring enabled ? 
 							if ( $this->quality_scoring )
@@ -511,7 +566,7 @@
 					}
 
 					# if sorting by @id is enabled and we have enough results 
-					if ( ($tmp_matches >= $fast_ext_sort_req_count || $total_matches >= $fast_ext_sort_req_count)  )
+					if ( $tmp_matches >= $fast_ext_sort_req_count || $total_matches >= $fast_ext_sort_req_count )
 					{
 						# we have found $fast_ext_sort_req_count results
 						$id_sort_goal = true;
@@ -519,19 +574,18 @@
 						if ( $total_matches ) $tmp_matches = $total_matches;
 						
 						# very approximate number of results
-						$approximate_docs = ($tmp_matches / $total_documents) * $this->documents_in_collection;
+						$approximate_docs = round(($tmp_matches / $total_documents) * $this->documents_in_collection);
 
 						# set the flag on for approximate result count
 						$this->result["approximate_count"] = 1;
 						
 						# the maximum amount of matches is the
-						$keyword_count  = count($sumcounts);
-						$match_sum 		= array_sum($sumcounts);
-						
-						# any keyword
+						$match_sum = array_sum($sumcounts_reference);
+
+						# any keyword === match
 						if ( $this->matchmode === 1 ) 
 						{
-							$minimum_matches = max($sumcounts);
+							$minimum_matches = max($sumcounts_reference);
 							
 							if ( $approximate_docs > $match_sum )
 							{
@@ -543,9 +597,10 @@
 								$approximate_docs = $minimum_matches;
 							}
 						}
+						# all keywords === match
 						else
 						{
-							$maximum_matches = min($sumcounts);
+							$maximum_matches = min($sumcounts_reference);
 							# all keywords must match
 							if ( $approximate_docs < $tmp_matches ) 
 							{
@@ -556,7 +611,7 @@
 								$approximate_docs = $maximum_matches;
 							}
 						}
-						
+
 						if ( $approximate_docs >= 100 )
 						{
 							$tmp_matches = (int)round($approximate_docs, -2);

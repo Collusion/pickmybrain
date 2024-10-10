@@ -24,9 +24,12 @@ if ( is_string($connection) )
 # check that runtime environment is 64bir
 if ( PHP_INT_SIZE !== 8 )
 {
-	echo "Pickmybrain requires a 64-bit PHP runtime environment.\n";
-	echo "Please update your PHP to continue.\n";
-	return;
+	if ( strpos(file_get_contents("PMBApi.php"), "32_BIT_VERSION") === false ) 
+	{
+		echo "32bit runtime environment detected\n";
+		echo "Please copy files from the bin32 folder into the main folder to continue\n";
+		return;
+	}
 }
 
 # check php version
