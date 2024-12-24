@@ -394,12 +394,14 @@ try
 		}
 	}
 
-	if ( !checkPMBIndexes() )
+	
+	$db_error = "";
+	if ( !checkPMBIndexes($db_error) )
 	{
 		++$errors;
 		echo "<div class='errorbox'>
 			<h3 style='color:#ff0000;'>Error: table PMBIndexes could not be created or modified.</h3>
-			<p>".$e->getMessage()."</p>
+			<p>$db_error</p>
 		  </div>";
 	}
 	

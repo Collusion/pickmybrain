@@ -355,7 +355,7 @@ function execInBackground($cmd)
     }
 }
 
-function checkPMBIndexes()
+function checkPMBIndexes($db_error = "")
 {
 	$table_sql = "CREATE TABLE PMBIndexes (
 	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
@@ -460,6 +460,7 @@ function checkPMBIndexes()
 	}
 	catch ( PDOException $e )
 	{
+		$db_error = $e->getMessage();
 		return false;
 	}
 	
