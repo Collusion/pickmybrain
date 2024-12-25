@@ -360,7 +360,7 @@ function checkPMBIndexes($db_error = "")
 	$table_sql = "CREATE TABLE PMBIndexes (
 	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
 	 name varbinary(20) NOT NULL DEFAULT '',
-	 type tinyint(3) unsigned NOT NULL DEFAULT '',
+	 type tinyint(3) unsigned NOT NULL DEFAULT '1',
 	 comment varbinary(255) NOT NULL DEFAULT '',
 	 documents int(10) unsigned NOT NULL DEFAULT '0',
 	 min_id int(10) unsigned NOT NULL DEFAULT '0',
@@ -375,7 +375,7 @@ function checkPMBIndexes($db_error = "")
 	 current_state tinyint(3) unsigned NOT NULL DEFAULT '0',
 	 temp_loads int(8) unsigned NOT NULL DEFAULT '0',
 	 temp_loads_left int(8) unsigned NOT NULL DEFAULT '0',
-	 disabled_documents mediumblob NOT NULL DEFAULT '',
+	 disabled_documents mediumblob NOT NULL,
 	 PRIMARY KEY (ID),
 	 UNIQUE KEY name (name)
 	) ENGINE=MYISAM DEFAULT CHARSET=utf8";
@@ -383,7 +383,7 @@ function checkPMBIndexes($db_error = "")
 	$required_columns = array(
 	"ID" 				=> "ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT",
 	"name" 				=> "name varbinary(20) NOT NULL DEFAULT ''",
-	"type" 				=> "type tinyint(3) unsigned NOT NULL DEFAULT ''",
+	"type" 				=> "type tinyint(3) unsigned NOT NULL DEFAULT '1'",
 	"comment" 			=> "comment varbinary(255) NOT NULL DEFAULT ''",
 	"documents" 		=> "documents int(10) unsigned NOT NULL DEFAULT '0'",
 	"min_id" 			=> "min_id int(10) unsigned NOT NULL DEFAULT '0'",
@@ -398,7 +398,7 @@ function checkPMBIndexes($db_error = "")
 	"current_state" 	=> "current_state tinyint(3) unsigned NOT NULL DEFAULT '0'",
 	"temp_loads" 		=> "temp_loads int(8) unsigned NOT NULL DEFAULT '0'",
 	"temp_loads_left" 	=> "temp_loads_left int(8) unsigned NOT NULL DEFAULT '0'",
-	"disabled_documents" => "disabled_documents mediumblob NOT NULL DEFAULT ''"
+	"disabled_documents" => "disabled_documents mediumblob NOT NULL"
 	);
 	
 	try
