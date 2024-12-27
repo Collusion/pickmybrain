@@ -938,7 +938,7 @@ while ( !empty($url_list[$lp]) )
 						
 					# check if url contains an illegel file extension
 					$apath = parse_url($href, PHP_URL_PATH);
-					$extension = pathinfo($apath, PATHINFO_EXTENSION);
+					$extension = ( isset($apath) ) ? pathinfo($apath, PATHINFO_EXTENSION) : "";
 					
 					if ( !empty($invalid_filetypes[$extension]) )
 					{
