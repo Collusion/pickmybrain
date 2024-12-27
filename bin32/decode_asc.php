@@ -57,7 +57,6 @@
 						{
 							# number ends
 							$delta = (string)($this->pow_lookup[$shift] * ($bits&127) + $temp + $delta);
-							++$conversions;
 
 							if ( $delta <= $max_doc_id )
 							{

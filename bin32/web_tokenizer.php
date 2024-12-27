@@ -762,7 +762,7 @@ while ( !empty($url_list[$lp]) )
 		# tokenize
 		$dom = new DOMDocument();
 		libxml_use_internal_errors(TRUE);
-		$dom->loadHTML(mb_convert_encoding($doc_data, 'html-entities', "UTF-8"));
+		$dom->loadHTML(mb_encode_numericentity($doc_data, array(0x80, 0x10FFFF, 0, ~0), 'UTF-8'));
 		$dom->preserveWhiteSpace = false;
 		$dom->formatOutput = false;
 		$base_url = url_basestructure($url);

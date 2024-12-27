@@ -92,6 +92,7 @@ class PickMyBrain
 	private $sentiment_analysis;
 	private $include_original_data;
 	private $use_internal_db;
+	private $sentiment_index;
 	
 	/* Internal */
 	private $allowed_sort_modes;
@@ -116,6 +117,8 @@ class PickMyBrain
 	private $min_doc_id;
 	private $max_doc_id;
 	private $decode_interval;
+	private $temp_grouper_size;
+	private $first_of_field;
 		
 	public function __construct($index_name = "")
 	{
@@ -3851,7 +3854,7 @@ class PickMyBrain
 		$stringlen = (int)(strlen(trim($searchstring))/2);
 				
 		# strip tags and normalize space
-		$string = strip_tags(str_replace(array("<", ">", "\n", "&amp;"), array(" <", "> ", " ", "&"), html_entity_decode(str_replace("&nbsp;", " ", htmlentities($string, NULL, 'UTF-8')))));
+		$string = strip_tags(str_replace(array("<", ">", "\n", "&amp;"), array(" <", "> ", " ", "&"), html_entity_decode(str_replace("&nbsp;", " ", htmlentities($string, ENT_QUOTES|ENT_SUBSTITUTE|ENT_HTML401, 'UTF-8')))));
 		
 		# string length
 		$string_len = strlen($string);
