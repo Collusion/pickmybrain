@@ -1964,6 +1964,7 @@ class PickMyBrain
 									doc_matches,
 									$max_dox_id_column
 									SUBSTR(doc_ids, 1, LOCATE(:bin_sep, doc_ids)-1) as doc_ids, 
+									0 as source,
 									$token_times_sql
 									$token_positions_sql
 									FROM PMBTokens".$this->suffix." WHERE " . implode(" OR ", $token_sql) . "
@@ -1975,6 +1976,7 @@ class PickMyBrain
 									doc_matches, 
 									$max_dox_id_column
 									SUBSTR(doc_ids, 1, LOCATE(:bin_sep, doc_ids)-1) as doc_ids, 
+									1 as source,
 									$token_times_sql
 									$token_positions_sql
 									FROM PMBTokens".$this->suffix."_delta WHERE " . implode(" OR ", $token_sql) . "
@@ -1986,7 +1988,8 @@ class PickMyBrain
 									$switch_typecase, 
 									doc_matches,
 									$max_dox_id_column
-									SUBSTR(doc_ids, 1, LOCATE(:bin_sep, doc_ids)-1) as doc_ids, 
+									SUBSTR(doc_ids, 1, LOCATE(:bin_sep, doc_ids)-1) as doc_ids,
+									0 as source, 
 									$token_times_sql
 									$token_positions_sql
 									FROM PMBTokens".$this->suffix." WHERE " . implode(" OR ", $token_sql);
@@ -2003,8 +2006,7 @@ class PickMyBrain
 			while ( $row = $tokpdo->fetch(PDO::FETCH_ASSOC) )
 			{	
 				$token = $row["token"]; 
-				$token_source = (int)$row["source"];
-				
+
 				# track token source (main vs delta) if we have a delta index
 				if ( $this->delta_documents > 0 ) 
 				{
@@ -2012,7 +2014,7 @@ class PickMyBrain
 					{
 						$token_source_table[$token] = 0;
 					}
-					$token_source_table[$token] |= 1 << $token_source;
+					$token_source_table[$token] |= 1 << (int)$row["source"];
 				}
 
 				# an exact match 
