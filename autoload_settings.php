@@ -24,7 +24,7 @@ if ( !is_readable($filepath) )
 }
 
 # use default settings as base values
-include_once(realpath(dirname(__FILE__)) . "/settings.php");
+include(realpath(dirname(__FILE__)) . "/settings.php");
 
 # parse the settings file
 if ( $data = parse_ini_file($filepath) )

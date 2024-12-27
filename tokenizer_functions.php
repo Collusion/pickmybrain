@@ -1861,18 +1861,18 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 	{
 		$create_table["PMBDocinfo$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBDocinfo$index_suffix (
 		 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-		 URL varbinary(500) NOT NULL,
-		 url_checksum binary(16) NOT NULL,
-		 token_count varchar(60) NOT NULL,
+		 URL varbinary(500) NOT NULL DEFAULT '',
+		 url_checksum binary(16) NOT NULL DEFAULT '',
+		 token_count varchar(60) NOT NULL DEFAULT '0',
 		 avgsentiscore tinyint(4) DEFAULT '0',
 		 attr_category tinyint(3) unsigned DEFAULT NULL,
-		 field0 varbinary(255) NOT NULL,
-		 field1 varbinary(10000) NOT NULL,
-		 field2 varbinary(255) NOT NULL,
-		 field3 varbinary(255) NOT NULL,
-		 attr_timestamp int(10) unsigned NOT NULL,
-		 checksum binary(16) NOT NULL,
-		 attr_domain int(10) unsigned NOT NULL,
+		 field0 varbinary(255) NOT NULL DEFAULT '',
+		 field1 varbinary(10000) NOT NULL DEFAULT '',
+		 field2 varbinary(255) NOT NULL DEFAULT '',
+		 field3 varbinary(255) NOT NULL DEFAULT '',
+		 attr_timestamp int(10) unsigned NOT NULL DEFAULT '0',
+		 checksum binary(16) NOT NULL DEFAULT '',
+		 attr_domain int(10) unsigned NOT NULL DEFAULT '0',
 		 PRIMARY KEY (ID),
 		 KEY attr_category (ID, attr_category),
 		 KEY url_checksum (url_checksum)
@@ -1883,18 +1883,18 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 	{
 		$create_table["PMBDocinfo$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBDocinfo$index_suffix (
 		 ID int(11) unsigned NOT NULL,
-		 avgsentiscore tinyint(4) NOT NULL,
+		 avgsentiscore tinyint(4) NOT NULL DEFAULT '0',
 		 PRIMARY KEY (ID),
 		 KEY avgsentiscore (ID, avgsentiscore)	
 		) ENGINE=MYISAM DEFAULT CHARSET=utf8 PACK_KEYS=1 ROW_FORMAT=FIXED $data_dir_sql";
 	}
 	
 	$create_table["PMBTokens$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBTokens$index_suffix (
-	 checksum int(10) unsigned NOT NULL,
-	 token varbinary(40) NOT NULL,
-	 metaphone smallint(5) unsigned DEFAULT 0,
-	 doc_matches int(8) unsigned NOT NULL,
-	 max_doc_id int(8) unsigned NOT NULL,
+	 checksum int(10) unsigned NOT NULL DEFAULT '0',
+	 token varbinary(40) NOT NULL DEFAULT '',
+	 metaphone smallint(5) unsigned DEFAULT '0',
+	 doc_matches int(8) unsigned NOT NULL DEFAULT '0',
+	 max_doc_id int(8) unsigned NOT NULL DEFAULT '0',
 	 doc_ids mediumblob NOT NULL,
 	 PRIMARY KEY (checksum, token),
 	 KEY metaphone (metaphone,doc_matches)
@@ -1902,8 +1902,8 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 	
 	$create_table["PMBCategories$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBCategories$index_suffix (
 	 ID mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-	 keyword varchar(255) NOT NULL,
-	 name varchar(255) NOT NULL,
+	 keyword varchar(255) NOT NULL DEFAULT '',
+	 name varchar(255) NOT NULL DEFAULT '',
 	 count mediumint(8) unsigned NOT NULL DEFAULT 0,
 	 type tinyint(3) unsigned NOT NULL DEFAULT 0,
 	 PRIMARY KEY (ID),
@@ -1911,19 +1911,19 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
 	
 	$create_table["PMBPrefixes$index_suffix"] = "CREATE TABLE IF NOT EXISTS PMBPrefixes$index_suffix (
-	 checksum int(10) unsigned NOT NULL,
+	 checksum int(10) unsigned NOT NULL DEFAULT '0',
 	 tok_data mediumblob NOT NULL,
 	 PRIMARY KEY (checksum)
 	 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 $row_compression $data_dir_sql";
 	
 	$create_table["PMBQueryLog$index_suffix"] = "CREATE TABLE PMBQueryLog$index_suffix (
 	 ID int(10) unsigned NOT NULL AUTO_INCREMENT,
-	 timestamp int(10) unsigned NOT NULL,
-	 ip int(10) unsigned NOT NULL,
-	 query varbinary(255) NOT NULL,
-	 results mediumint(8) unsigned NOT NULL,
-	 searchmode tinyint(3) unsigned NOT NULL,
-	 querytime mediumint(8) unsigned NOT NULL,
+	 timestamp int(10) unsigned NOT NULL DEFAULT '0',
+	 ip int(10) unsigned NOT NULL DEFAULT '0',
+	 query varbinary(255) NOT NULL DEFAULT '',
+	 results mediumint(8) unsigned NOT NULL DEFAULT '0',
+	 searchmode tinyint(3) unsigned NOT NULL DEFAULT '0',
+	 querytime mediumint(8) unsigned NOT NULL DEFAULT '0',
 	 PRIMARY KEY (ID),
 	 KEY query (query),
 	 KEY ip (ip),
@@ -1935,13 +1935,12 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 	# if not, create the tables
 	try
 	{
-		$connection = db_connection();
+		$connection 				= db_connection();
 		$created_tables 			= array();
 		$data_directory_warning 	= "";
 		$general_database_errors 	= array();
-		$latest_sql = "";
-		$connection->beginTransaction();
-		
+		$latest_sql 				= "";
+
 		foreach ( $create_table as $table_name => $table_sql ) 
 		{
 			try
@@ -1957,7 +1956,6 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 			}
 			catch( PDOException $e )
 			{
-				#echo $e->getMessage() . "\n";
 				if ( !empty($data_dir_sql) )
 				{
 					# maybe the failure is because because a custom data directory is set ! 
@@ -1986,16 +1984,11 @@ function create_tables($index_id, $index_type, &$created_tables = array(), &$dat
 					++$errors;
 				}
 			}
-			
+
 		}
-		
-		$connection->commit();
 	}
 	catch ( PDOException $e ) 
 	{
-		echo $e->getMessage() . "\n";
-		
-		$connection->rollBack();
 		$general_database_errors[] = $e->getMessage();
 	}
 	

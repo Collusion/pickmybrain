@@ -737,9 +737,6 @@ else if ( !empty($_POST["action"]) && $_POST["action"] === "runindexer" && !empt
 				# launch via async curl
 				$url_to_exec = "http://localhost" . str_replace("control.php", $file_to_execute, $_SERVER['SCRIPT_NAME']) . "?mode=usermode&index_id=$index_id";
 				execWithCurl($url_to_exec);
-				
-				#var_dump("executing: $url_to_exec \n");
-				#$redirect = 100;
 			}
 		}
 		else if ( !empty($_POST["purge_index"]) ) 
@@ -1029,10 +1026,6 @@ Hi there! Start configuration of your Pickmybrain search engine by selecting an 
    </p>
    
 </div>
-
-
-
-
 </div>
 </section>
  <!-- footer
@@ -1057,8 +1050,6 @@ Hi there! Start configuration of your Pickmybrain search engine by selecting an 
   
 </body>
 </html>
-
-
 
 <?php
 
@@ -1098,16 +1089,16 @@ if ( !create_tables($index_id, $index_type, $created_tables, $data_directory_war
 
 if ( is_readable("sentiment/pmbsentiment.php") )
 {
-		include("sentiment/pmbsentiment.php");
-			
-		if ( class_exists("PMBSentiment") )
-		{
-			$sentiment_available = true;
-		}
-		else
-		{
-			$sentiment_available = false;
-		}
+	include("sentiment/pmbsentiment.php");
+		
+	if ( class_exists("PMBSentiment") )
+	{
+		$sentiment_available = true;
+	}
+	else
+	{
+		$sentiment_available = false;
+	}
 }
 else
 {
@@ -1614,7 +1605,7 @@ switch ( $innodb_row_format )
     	Notice: subdomain can be given as a wildcard ( like http://*.mydomain.com ). This will allow all subdomains for this particular domain, even if subdomains are disabled otherwise. 
     </p>
     <p>
-    <textarea name='seed_urls' style='width:100%;min-height:300px;' placeholder='Insert seed urls here, one per row' ><?php echo implode("\n", $seed_urls) ?></textarea>
+    <textarea name='seed_urls' style='width:100%;min-height:300px;' placeholder='Insert seed urls here, one per row' ><?php if ( !empty($seed_urls) ) echo implode("\n", $seed_urls) ?></textarea>
     </p>
    
 </div>
@@ -1977,7 +1968,7 @@ switch ( $innodb_row_format )
         Outcome: <b>My photo page</b>
     </p>
     <p>
-          <textarea name="trim_page_title" placeholder="Insert one trim value per line" style='width:50%;height:200px;'><?php print_r(implode("\n", $trim_page_title)); ?></textarea>
+          <textarea name="trim_page_title" placeholder="Insert one trim value per line" style='width:50%;height:200px;'><?php if ( !empty($trim_page_title) ) print_r(implode("\n", $trim_page_title)); ?></textarea>
     </p>
 </div>
 
