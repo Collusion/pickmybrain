@@ -107,7 +107,7 @@
 							$p = $matchpos_len-1;
 							$travel = $matchpos_len-$doc_pos_pointers[$group];
 						}
-						
+
 						$got = substr_count($matchpos_data, $bin_sep, $doc_pos_pointers[$group], $travel);
 						
 						if ( $got < $vals ) 
@@ -137,13 +137,28 @@
 						{
 							$vals = ( $got === $vals ) ? 1 : $got - $vals + 1;
 							if ( $matchpos_data[$p] === $bin_sep ) ++$vals;
-							while ( $r < $vals && $p > 0 ) 
+							
+							while ( true ) 
 							{
+								if ( $matchpos_data[$p] === $bin_sep )
+								{
+									--$p;
+									++$r;
+									if ( $r === $vals )
+									{
+										break;
+									}
+								}
 								--$p;
-								if ( $matchpos_data[$p] === $bin_sep ) ++$r;
+								if ( $p <= 0 )
+								{
+									$p=-1;
+									break;
+								}
 							}
+							++$p;
 						}
-
+						
 						$encoded_group = $this->hex_lookup_encode[$group];
 						$data = explode($bin_sep, substr($matchpos_data, $doc_pos_pointers[$group], $p-$doc_pos_pointers[$group]));
 						$doc_pos_pointers[$group] = $p+1;
