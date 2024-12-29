@@ -1,8 +1,8 @@
 Pickmybrain
 -----------
 
-Version:   1.020 Release 
-Published: 10.10.2024
+Version:   1.021 Release 
+Published: 29.12.2024
 
 copyright 2015-2024 Henri Ruutinen 
 
@@ -55,7 +55,7 @@ Compatibility
 In short:
 - PHP >= 5.3 (x86 compatible, x64 recommended)
 - MySQL >= 5.1 ( or equivalent )
-- Not yet tested with PHP 8 (tbd)
+- PHP 8 is supported
 
 Pickmybrain is developed and tested on Linux. More specifically
 on 64-bit version of Ubuntu 14.04.1 LTS, though Pickmybrain should work on 
