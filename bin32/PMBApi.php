@@ -3958,7 +3958,7 @@ class PickMyBrain
 								continue;
 							}
 							
-							$match[0] = strtolower($match[0]);
+							$match[0] = mb_strtolower($match[0]);
 							$maxposlist[$chunk] = $match[1];
 							$resultset[$chunk][] = $match[1];
 							$poslist[$match[1]] = 1;
