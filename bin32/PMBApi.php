@@ -3860,7 +3860,7 @@ class PickMyBrain
 		$string_len = strlen($string);
 	
 		# explode string and remove duplicates
-		$keywords = array_flip(array_flip((explode(" ", mb_strtolower($searchstring)))));
+		$keywords = array_flip(array_flip((explode(" ", mb_strtolower($searchstring, 'UTF-8')))));
 		
 		$wholecount = 0;
 		$new_words_to_highlight = array();
@@ -3872,7 +3872,6 @@ class PickMyBrain
 		# try matching the whole searchstring first
 		if ( $wordcount > 1 ) 
 		{
-			#$tpos = stripos($string, $searchstring." ");
 			$pre_match = array();
 			preg_match('/\b'.preg_quote($searchstring,"/").'\b/iu', $string, $pre_match, PREG_OFFSET_CAPTURE);
 	
@@ -3917,12 +3916,10 @@ class PickMyBrain
 					{
 						if ( $lang === 'fi' )
 						{
-							#$stemmed_keyword = stem_finnish($chunk);
 							$stemmed_keyword = PMBStemmer::stem_finnish($chunk);
 						}
 						else
 						{
-							#$stemmed_keyword = stem_english($chunk);
 							$stemmed_keyword = PMBStemmer::stem_english($chunk);
 						}
 						
@@ -3958,7 +3955,7 @@ class PickMyBrain
 								continue;
 							}
 							
-							$match[0] = mb_strtolower($match[0]);
+							$match[0] = mb_strtolower($match[0], 'UTF-8');
 							$maxposlist[$chunk] = $match[1];
 							$resultset[$chunk][] = $match[1];
 							$poslist[$match[1]] = 1;
