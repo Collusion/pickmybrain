@@ -231,6 +231,7 @@ class PickMyBrain
 		$this->indexing_interval	= $indexing_interval;
 		$this->max_results			= 1000;
 		$this->temp_grouper_size	= 10000;
+		$this->decode_interval		= 10000;
 		$this->charset_regexp		= "/[^" . $charset . preg_quote(implode("", $blend_chars)) . "*\"()]/u";
 		$this->blend_chars			= array();
 		$this->ignore_chars			= $ignore_chars;

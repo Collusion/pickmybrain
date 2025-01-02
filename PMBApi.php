@@ -2392,7 +2392,7 @@ class PickMyBrain
 				$doc_lengths[] 		= 0;
 				$undone_values[]	= 0;
 				
-				$db_token_list[]		= " ";
+				$db_token_list[]	= " ";
 			}
 
 			$required_bits = 0;

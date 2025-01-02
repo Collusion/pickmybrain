@@ -259,22 +259,45 @@ class PackedIntegers
 	}
 } 
 
+/* check if all required 32bit binaries are installed by trying to find a predifined keyword in them
+return values:
+	- array of file names that were not detected to be 32bit compatible 
+	- empty array if all checked files seemed to be 32bit compatible
+	*/
 function check_32bit_binaries()
 {
+	$files	= array();
 	$result = array();
-
-	if ( strpos(file_get_contents("db_tokenizer.php"), 				"32_BIT_VERSION") === false ) $result[] = "db_tokenizer.php";
-	if ( strpos(file_get_contents("decode_asc.php"), 				"32_BIT_VERSION") === false ) $result[] = "decode_asc.php";
-	if ( strpos(file_get_contents("decode_desc.php"), 				"32_BIT_VERSION") === false ) $result[] = "decode_desc.php";
-	if ( strpos(file_get_contents("PMBApi.php"), 					"32_BIT_VERSION") === false ) $result[] = "PMBApi.php";
-	if ( strpos(file_get_contents("prefix_composer.php"), 			"32_BIT_VERSION") === false ) $result[] = "prefix_composer.php";
-	if ( strpos(file_get_contents("prefix_compressor.php"), 		"32_BIT_VERSION") === false ) $result[] = "prefix_compressor.php";
-	if ( strpos(file_get_contents("prefix_compressor_merger.php"), 	"32_BIT_VERSION") === false ) $result[] = "prefix_compressor_merger.php";
-	if ( strpos(file_get_contents("token_compressor.php"), 			"32_BIT_VERSION") === false ) $result[] = "token_compressor.php";
-	if ( strpos(file_get_contents("token_compressor_merger.php"), 	"32_BIT_VERSION") === false ) $result[] = "token_compressor_merger.php";
-	if ( strpos(file_get_contents("tokenizer_functions.php"), 		"32_BIT_VERSION") === false ) $result[] = "tokenizer_functions.php";
-	if ( strpos(file_get_contents("web_tokenizer.php"), 			"32_BIT_VERSION") === false ) $result[] = "web_tokenizer.php";
 	
+	$files[] = "db_tokenizer.php";
+	$files[] = "decode_asc.php";
+	$files[] = "decode_desc.php";
+	$files[] = "PMBApi.php";
+	$files[] = "prefix_composer.php";
+	$files[] = "prefix_compressor.php";
+	$files[] = "prefix_compressor_merger.php";
+	$files[] = "token_compressor.php";
+	$files[] = "token_compressor_merger.php";
+	$files[] = "tokenizer_functions.php";
+	$files[] = "web_tokenizer.php";
+	
+	$folder_path = realpath(dirname(__FILE__));
+	
+	# to prevent self-match
+	$needle = "32_BIT";
+	$needle .= "_VERSION";
+	
+	foreach ( $files as $filename ) 
+	{
+		$filepath = $folder_path . "/" . $filename;
+		
+		// read 500 bytes of the file and check if the read data contains the identifier created for the 32 bit binaries
+		if ( strpos(file_get_contents($filepath, FALSE, NULL, 0, 500), $needle) === false )
+		{
+			$result[] = $filename;
+		}
+	}
+
 	return $result;
 }
 

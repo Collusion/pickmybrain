@@ -583,7 +583,7 @@
 								
 					$min_doc_id += $interval;
 					$max_doc_id += $interval;
-					
+
 					unset($t_matches, $loop_doc_groups, $loop_doc_positions);
 					$t_matches = array();
 					$loop_doc_positions = array();

@@ -268,7 +268,9 @@ return values:
 	*/
 function check_32bit_binaries()
 {
-	$files   = array();
+	$files	= array();
+	$result = array();
+	
 	$files[] = "db_tokenizer.php";
 	$files[] = "decode_asc.php";
 	$files[] = "decode_desc.php";
@@ -281,17 +283,24 @@ function check_32bit_binaries()
 	$files[] = "tokenizer_functions.php";
 	$files[] = "web_tokenizer.php";
 	
-	foreach ( $files as $i => $filename ) 
+	$folder_path = realpath(dirname(__FILE__));
+	
+	# to prevent self-match
+	$needle = "32_BIT";
+	$needle .= "_VERSION";
+	
+	foreach ( $files as $filename ) 
 	{
+		$filepath = $folder_path . "/" . $filename;
+		
 		// read 500 bytes of the file and check if the read data contains the identifier created for the 32 bit binaries
-		if ( strpos(file_get_contents($filename, FALSE, NULL, 0, 500), "32_BIT_VERSION") !== false )
+		if ( strpos(file_get_contents($filepath, FALSE, NULL, 0, 500), $needle) === false )
 		{
-			// if 32bit identifier was found, remove the file from the list
-			unset($files[$i]);
+			$result[] = $filename;
 		}
 	}
-	
-	return $files;
+
+	return $result;
 }
 
 /* placeholder function */
