@@ -1533,6 +1533,7 @@ class PickMyBrain
 				if ( $quoted_area ) 
 				{
 					$exact_words[$token] = 1;
+					$disable_stemming_temp = true; # disable stemming for this keyword
 				}
 				
 				$token_order[] = $token;
